@@ -134,7 +134,21 @@ Draw(
     edit_options={"edit": True, "remove": True},
 ).add_to(folium_map)
 
-map_state = st_folium(folium_map, width=None, height=map_height, key="main_map")
+map_figure = folium.Figure(height=map_height)
+map_figure.add_child(folium_map)
+
+# returned_objects se limita a los dibujos: por defecto st_folium tambien
+# devuelve center/zoom/bounds, que cambian con cada pan o zoom y disparan un
+# rerun completo (remontando el componente), lo que causa el efecto visual
+# de "se agranda y se achica". Al no observar esos campos, el mapa solo
+# vuelve a correr el script cuando el usuario efectivamente dibuja algo.
+map_state = st_folium(
+    map_figure,
+    height=map_height,
+    use_container_width=True,
+    returned_objects=["all_drawings", "last_active_drawing"],
+    key="main_map",
+)
 
 drawing = None
 if map_state:
