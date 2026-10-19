@@ -18,71 +18,129 @@ st.set_page_config(page_title="Extractor UH", page_icon="\U0001F3E0", layout="wi
 PATTERNFLY_CSS_CDN = "https://unpkg.com/@patternfly/patternfly@5.4.1/patternfly.min.css"
 
 
-def inject_patternfly_theme() -> None:
-    """Carga el CSS de PatternFly y reestiliza los widgets nativos de Streamlit
-    con los tokens de color/tipografia de PatternFly (no son componentes React
-    de PatternFly, sino una aproximacion visual via CSS)."""
+def inject_theme() -> None:
+    """Carga el CSS de PatternFly y lo combina con la paleta/tipografia de un
+    design system tipo "Data-Dense Dashboard" (generado con la skill
+    ui-ux-pro-max) reestilizando los widgets nativos de Streamlit (no son
+    componentes React de PatternFly, sino una aproximacion visual via CSS)."""
     st.markdown(
         f"""
         <link rel="stylesheet" href="{PATTERNFLY_CSS_CDN}">
         <link rel="preconnect" href="https://fonts.googleapis.com">
-        <link href="https://fonts.googleapis.com/css2?family=Red+Hat+Text:wght@400;500;700&display=swap" rel="stylesheet">
+        <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
         <style>
+            :root {{
+                --color-primary: #3B82F6;
+                --color-secondary: #60A5FA;
+                --color-cta: #F97316;
+                --color-cta-hover: #EA670C;
+                --color-bg: #F8FAFC;
+                --color-surface: #FFFFFF;
+                --color-border: #E2E8F0;
+                --color-text: #1E293B;
+                --color-text-muted: #64748B;
+            }}
             html, body, [class*="css"] {{
-                font-family: "Red Hat Text", "RedHatText", Overpass, Arial, sans-serif;
+                font-family: "Fira Sans", "Red Hat Text", Arial, sans-serif;
+                color: var(--color-text);
+            }}
+            [data-testid="stAppViewContainer"], [data-testid="stHeader"] {{
+                background-color: var(--color-bg);
             }}
             .pf-page-header {{
-                border-bottom: 1px solid #d2d2d2;
+                border-bottom: 1px solid var(--color-border);
                 padding-bottom: 0.75rem;
                 margin-bottom: 1rem;
             }}
             .pf-page-header h1 {{
-                color: #151515;
+                color: var(--color-text);
                 font-weight: 700;
                 margin-bottom: 0.25rem;
             }}
             .pf-page-header p {{
-                color: #6a6e73;
+                color: var(--color-text-muted);
                 margin: 0;
             }}
             .pf-section-title {{
-                color: #151515;
+                color: var(--color-text);
                 font-weight: 600;
                 font-size: 1.1rem;
-                border-left: 4px solid #0066cc;
+                border-left: 4px solid var(--color-primary);
                 padding-left: 0.6rem;
-                margin: 1.25rem 0 0.75rem 0;
+                margin: 0.25rem 0 0.75rem 0;
             }}
+
+            /* Tarjetas: st.container(border=True) y st.expander quedan con
+               look de panel de dashboard (fondo blanco, borde suave, sombra). */
+            div[data-testid="stVerticalBlockBorderWrapper"],
+            div[data-testid="stExpander"] {{
+                background-color: var(--color-surface);
+                border: 1px solid var(--color-border) !important;
+                border-radius: 10px !important;
+                box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
+            }}
+
             div.stButton > button {{
-                background-color: #0066cc;
+                background-color: var(--color-cta);
                 color: #ffffff;
-                border: 1px solid #0066cc;
-                border-radius: 3px;
-                font-weight: 500;
-                padding: 0.5rem 1.2rem;
+                border: 1px solid var(--color-cta);
+                border-radius: 6px;
+                font-weight: 600;
+                padding: 0.55rem 1.25rem;
+                cursor: pointer;
+                transition: background-color 150ms ease;
             }}
             div.stButton > button:hover {{
-                background-color: #004c99;
-                border-color: #004c99;
+                background-color: var(--color-cta-hover);
+                border-color: var(--color-cta-hover);
                 color: #ffffff;
+            }}
+            div.stButton > button:focus-visible,
+            div[data-baseweb="select"] > div:focus-within,
+            div[data-testid="stTextInput"] input:focus-visible,
+            div[data-testid="stNumberInput"] input:focus-visible {{
+                outline: 2px solid var(--color-primary) !important;
+                outline-offset: 2px !important;
             }}
             div[data-baseweb="select"] > div,
             div[data-testid="stNumberInput"] input,
             div[data-testid="stTextInput"] input {{
-                border-radius: 3px !important;
-                border-color: #8a8d90 !important;
+                border-radius: 6px !important;
+                border-color: var(--color-border) !important;
             }}
+
             .pf-grid-header {{
-                background-color: #f0f0f0;
-                border-top: 1px solid #d2d2d2;
-                border-bottom: 1px solid #d2d2d2;
+                background-color: #F1F5F9;
+                border-top: 1px solid var(--color-border);
+                border-bottom: 1px solid var(--color-border);
                 padding: 0.4rem 0;
                 font-weight: 600;
-                color: #151515;
+                color: var(--color-text);
             }}
             .pf-grid-row {{
-                border-bottom: 1px solid #ededed;
+                border-bottom: 1px solid #F1F5F9;
                 padding: 0.25rem 0;
+                font-family: "Fira Code", monospace;
+                font-size: 0.9rem;
+                color: var(--color-text);
+            }}
+
+            /* Resalta la fila completa al pasar el mouse (cada fila de la
+               grilla es un st.columns(), que Streamlit renderiza como un
+               stHorizontalBlock). */
+            div[data-testid="stExpander"] div[data-testid="stHorizontalBlock"] {{
+                transition: background-color 150ms ease;
+                border-radius: 6px;
+            }}
+            div[data-testid="stExpander"] div[data-testid="stHorizontalBlock"]:hover {{
+                background-color: #EFF6FF;
+            }}
+
+            /* Evita que el layout salte al alternar entre st.info/st.success/st.warning */
+            div[data-testid="stAlert"] {{
+                min-height: 52px;
+                display: flex;
+                align-items: center;
             }}
         </style>
         """,
@@ -90,7 +148,7 @@ def inject_patternfly_theme() -> None:
     )
 
 
-inject_patternfly_theme()
+inject_theme()
 
 st.markdown(
     """
@@ -117,56 +175,57 @@ with st.sidebar:
     zoom = st.slider("Zoom inicial", min_value=2, max_value=20, value=17)
     map_height = st.slider("Altura del mapa (px)", min_value=400, max_value=1000, value=750, step=50)
 
-st.markdown('<div class="pf-section-title">1. Dibuje el área de interés</div>', unsafe_allow_html=True)
-st.caption("Use la herramienta de polígono del mapa (icono de pentágono) para trazar un área cerrada.")
+with st.container(border=True):
+    st.markdown('<div class="pf-section-title">1. Dibuje el área de interés</div>', unsafe_allow_html=True)
+    st.caption("Use la herramienta de polígono del mapa (icono de pentágono) para trazar un área cerrada.")
 
-folium_map = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, control_scale=True)
-Draw(
-    export=False,
-    draw_options={
-        "polygon": True,
-        "rectangle": False,
-        "circle": False,
-        "circlemarker": False,
-        "marker": False,
-        "polyline": False,
-    },
-    edit_options={"edit": True, "remove": True},
-).add_to(folium_map)
+    folium_map = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, control_scale=True)
+    Draw(
+        export=False,
+        draw_options={
+            "polygon": True,
+            "rectangle": False,
+            "circle": False,
+            "circlemarker": False,
+            "marker": False,
+            "polyline": False,
+        },
+        edit_options={"edit": True, "remove": True},
+    ).add_to(folium_map)
 
-map_figure = folium.Figure(height=map_height)
-map_figure.add_child(folium_map)
+    map_figure = folium.Figure(height=map_height)
+    map_figure.add_child(folium_map)
 
-# returned_objects se limita a los dibujos: por defecto st_folium tambien
-# devuelve center/zoom/bounds, que cambian con cada pan o zoom y disparan un
-# rerun completo (remontando el componente), lo que causa el efecto visual
-# de "se agranda y se achica". Al no observar esos campos, el mapa solo
-# vuelve a correr el script cuando el usuario efectivamente dibuja algo.
-map_state = st_folium(
-    map_figure,
-    height=map_height,
-    use_container_width=True,
-    returned_objects=["all_drawings", "last_active_drawing"],
-    key="main_map",
-)
+    # returned_objects se limita a los dibujos: por defecto st_folium tambien
+    # devuelve center/zoom/bounds, que cambian con cada pan o zoom y disparan un
+    # rerun completo (remontando el componente), lo que causa el efecto visual
+    # de "se agranda y se achica". Al no observar esos campos, el mapa solo
+    # vuelve a correr el script cuando el usuario efectivamente dibuja algo.
+    map_state = st_folium(
+        map_figure,
+        height=map_height,
+        use_container_width=True,
+        returned_objects=["all_drawings", "last_active_drawing"],
+        key="main_map",
+    )
 
-drawing = None
-if map_state:
-    drawing = map_state.get("last_active_drawing")
-    if not drawing and map_state.get("all_drawings"):
-        drawing = map_state["all_drawings"][-1]
+    drawing = None
+    if map_state:
+        drawing = map_state.get("last_active_drawing")
+        if not drawing and map_state.get("all_drawings"):
+            drawing = map_state["all_drawings"][-1]
 
-if drawing and drawing.get("geometry", {}).get("type") == "Polygon":
-    st.session_state.polygon_coords = drawing["geometry"]["coordinates"][0]
+    if drawing and drawing.get("geometry", {}).get("type") == "Polygon":
+        st.session_state.polygon_coords = drawing["geometry"]["coordinates"][0]
 
-col_button, col_status = st.columns([1, 3])
-with col_button:
-    run_detection = st.button("Obtener unidades habitacionales", type="primary", use_container_width=True)
-with col_status:
-    if st.session_state.polygon_coords:
-        st.success(f"Polígono capturado con {len(st.session_state.polygon_coords)} vértices.")
-    else:
-        st.info("Dibuje un polígono cerrado sobre el mapa para habilitar el análisis.")
+    col_button, col_status = st.columns([1, 3])
+    with col_button:
+        run_detection = st.button("Obtener unidades habitacionales", type="primary", use_container_width=True)
+    with col_status:
+        if st.session_state.polygon_coords:
+            st.success(f"Polígono capturado con {len(st.session_state.polygon_coords)} vértices.")
+        else:
+            st.info("Dibuje un polígono cerrado sobre el mapa para habilitar el análisis.")
 
 
 def simulate_ai_detection(coords):
