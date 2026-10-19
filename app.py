@@ -299,9 +299,9 @@ if "detection_run_id" not in st.session_state:
 
 with st.sidebar:
     st.markdown("### Configuración del mapa")
-    center_lat = st.number_input("Latitud centro", value=40.4168, format="%.6f")
-    center_lon = st.number_input("Longitud centro", value=-3.7038, format="%.6f")
-    zoom = st.slider("Zoom inicial", min_value=2, max_value=20, value=17)
+    center_lat = st.number_input("Latitud centro", value=7.1200, format="%.6f")
+    center_lon = st.number_input("Longitud centro", value=-66.1800, format="%.6f")
+    zoom = st.slider("Zoom inicial", min_value=2, max_value=20, value=6)
     map_height = st.slider("Altura del mapa (px)", min_value=500, max_value=1200, value=800, step=50)
 
 with st.container(border=True):
