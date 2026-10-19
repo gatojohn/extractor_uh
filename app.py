@@ -115,6 +115,7 @@ with st.sidebar:
     center_lat = st.number_input("Latitud centro", value=40.4168, format="%.6f")
     center_lon = st.number_input("Longitud centro", value=-3.7038, format="%.6f")
     zoom = st.slider("Zoom inicial", min_value=2, max_value=20, value=17)
+    map_height = st.slider("Altura del mapa (px)", min_value=400, max_value=1000, value=750, step=50)
 
 st.markdown('<div class="pf-section-title">1. Dibuje el área de interés</div>', unsafe_allow_html=True)
 st.caption("Use la herramienta de polígono del mapa (icono de pentágono) para trazar un área cerrada.")
@@ -133,7 +134,7 @@ Draw(
     edit_options={"edit": True, "remove": True},
 ).add_to(folium_map)
 
-map_state = st_folium(folium_map, width=None, height=520, key="main_map")
+map_state = st_folium(folium_map, width=None, height=map_height, key="main_map")
 
 drawing = None
 if map_state:
@@ -194,64 +195,63 @@ if run_detection:
             st.session_state.units = simulate_ai_detection(st.session_state.polygon_coords)
             st.session_state.detection_run_id += 1
 
-st.markdown('<div class="pf-section-title">2. Unidades habitacionales detectadas</div>', unsafe_allow_html=True)
+with st.expander("2. Unidades habitacionales detectadas", expanded=True):
+    if not st.session_state.units:
+        st.caption("Aún no se ha ejecutado el análisis.")
+    else:
+        run_id = st.session_state.detection_run_id
+        column_widths = [0.5, 2, 2.3, 1.3, 1, 1]
 
-if not st.session_state.units:
-    st.caption("Aún no se ha ejecutado el análisis.")
-else:
-    run_id = st.session_state.detection_run_id
-    column_widths = [0.5, 2, 2.3, 1.3, 1, 1]
+        header_cols = st.columns(column_widths)
+        for col, label in zip(
+            header_cols,
+            ["#", "Nombre del inmueble", "Coordenadas (lat, lon)", "Tipo", "Pisos", "Apartamentos"],
+        ):
+            col.markdown(f"<div class='pf-grid-header'>{label}</div>", unsafe_allow_html=True)
 
-    header_cols = st.columns(column_widths)
-    for col, label in zip(
-        header_cols,
-        ["#", "Nombre del inmueble", "Coordenadas (lat, lon)", "Tipo", "Pisos", "Apartamentos"],
-    ):
-        col.markdown(f"<div class='pf-grid-header'>{label}</div>", unsafe_allow_html=True)
+        tipo_options = ["Casa", "Edificio"]
 
-    tipo_options = ["Casa", "Edificio"]
+        for unit in st.session_state.units:
+            row_cols = st.columns(column_widths)
+            key_prefix = f"{run_id}_{unit['id']}"
 
-    for unit in st.session_state.units:
-        row_cols = st.columns(column_widths)
-        key_prefix = f"{run_id}_{unit['id']}"
+            row_cols[0].markdown(f"<div class='pf-grid-row'>{unit['id']}</div>", unsafe_allow_html=True)
 
-        row_cols[0].markdown(f"<div class='pf-grid-row'>{unit['id']}</div>", unsafe_allow_html=True)
+            unit["nombre"] = row_cols[1].text_input(
+                "Nombre", value=unit["nombre"], key=f"nombre_{key_prefix}", label_visibility="collapsed"
+            )
 
-        unit["nombre"] = row_cols[1].text_input(
-            "Nombre", value=unit["nombre"], key=f"nombre_{key_prefix}", label_visibility="collapsed"
-        )
+            row_cols[2].markdown(
+                f"<div class='pf-grid-row'>{unit['lat']}, {unit['lon']}</div>", unsafe_allow_html=True
+            )
 
-        row_cols[2].markdown(
-            f"<div class='pf-grid-row'>{unit['lat']}, {unit['lon']}</div>", unsafe_allow_html=True
-        )
-
-        unit["tipo"] = row_cols[3].selectbox(
-            "Tipo",
-            tipo_options,
-            index=tipo_options.index(unit["tipo"]),
-            key=f"tipo_{key_prefix}",
-            label_visibility="collapsed",
-        )
-
-        if unit["tipo"] == "Edificio":
-            unit["pisos"] = row_cols[4].number_input(
-                "Pisos",
-                min_value=1,
-                value=unit["pisos"] or 1,
-                step=1,
-                key=f"pisos_{key_prefix}",
+            unit["tipo"] = row_cols[3].selectbox(
+                "Tipo",
+                tipo_options,
+                index=tipo_options.index(unit["tipo"]),
+                key=f"tipo_{key_prefix}",
                 label_visibility="collapsed",
             )
-            unit["apartamentos"] = row_cols[5].number_input(
-                "Apartamentos",
-                min_value=1,
-                value=unit["apartamentos"] or 1,
-                step=1,
-                key=f"apartamentos_{key_prefix}",
-                label_visibility="collapsed",
-            )
-        else:
-            unit["pisos"] = None
-            unit["apartamentos"] = None
-            row_cols[4].markdown("<div class='pf-grid-row'>&mdash;</div>", unsafe_allow_html=True)
-            row_cols[5].markdown("<div class='pf-grid-row'>&mdash;</div>", unsafe_allow_html=True)
+
+            if unit["tipo"] == "Edificio":
+                unit["pisos"] = row_cols[4].number_input(
+                    "Pisos",
+                    min_value=1,
+                    value=unit["pisos"] or 1,
+                    step=1,
+                    key=f"pisos_{key_prefix}",
+                    label_visibility="collapsed",
+                )
+                unit["apartamentos"] = row_cols[5].number_input(
+                    "Apartamentos",
+                    min_value=1,
+                    value=unit["apartamentos"] or 1,
+                    step=1,
+                    key=f"apartamentos_{key_prefix}",
+                    label_visibility="collapsed",
+                )
+            else:
+                unit["pisos"] = None
+                unit["apartamentos"] = None
+                row_cols[4].markdown("<div class='pf-grid-row'>&mdash;</div>", unsafe_allow_html=True)
+                row_cols[5].markdown("<div class='pf-grid-row'>&mdash;</div>", unsafe_allow_html=True)
