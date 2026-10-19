@@ -11,42 +11,50 @@ validar el flujo de usuario antes de integrar un modelo real.
 
 ## Funcionalidad
 
-1. **Mapa interactivo**: se carga un mapa (Leaflet, vía [folium](https://python-visualization.github.io/folium/))
-   centrado en las coordenadas configuradas en la barra lateral.
-2. **Dibujo de polígono**: usando la herramienta de dibujo del mapa
-   ([`folium.plugins.Draw`](https://python-visualization.github.io/folium/latest/user_guide/plugins/draw.html)),
-   el usuario traza con el mouse un polígono cerrado sobre la zona de interés.
-3. **Botón "Obtener unidades habitacionales"**: al presionarlo, se simula que
-   un modelo de IA analiza el área delimitada por el polígono e identifica
-   los inmuebles presentes.
-4. **Grilla de resultados**: debajo del mapa se despliega una tabla con:
+1. **Mapa interactivo** ([folium](https://python-visualization.github.io/folium/) + Leaflet),
+   con dos capas seleccionables desde el control de capas:
+   - **Oscuro** (por defecto): tiles de OpenStreetMap con un filtro oscuro.
+   - **Satelital**: imágenes de Esri World Imagery, útiles para reconocer inmuebles.
+2. **Dibujo de polígono**: con la herramienta de polígono del mapa
+   ([`folium.plugins.Draw`](https://python-visualization.github.io/folium/latest/user_guide/plugins/draw.html))
+   el usuario traza con el mouse un área cerrada. Se puede editar o borrar.
+3. **Botón "Obtener unidades habitacionales"**: simula que un modelo de IA
+   analiza el área delimitada e identifica los inmuebles presentes. Un
+   indicador de estado junto al botón informa vértices capturados y unidades
+   detectadas.
+4. **Grilla de resultados** (sección colapsable) con:
    - Número de fila (ascendente).
    - Nombre del inmueble (editable, por defecto "Inmueble 1", "Inmueble 2", ...).
    - Coordenadas geográficas del inmueble.
    - Lista desplegable **Tipo**: `Casa` o `Edificio`.
-   - Si el tipo es `Edificio`, se habilitan los campos **Pisos** y
-     **Apartamentos** para registrar esa información.
+   - Si el tipo es `Edificio`, se habilitan los campos **Pisos** y **Apartamentos**.
+
+La barra lateral permite ajustar el centro del mapa, el zoom inicial y la
+altura del mapa (800 px por defecto).
 
 ## Diseño visual
 
-La interfaz utiliza el CSS de [PatternFly](https://www.patternfly.org/) (cargado
-desde CDN) junto con una hoja de estilos propia que reutiliza los tokens de
-color y tipografía de PatternFly (azul primario `#0066cc`, fuente *Red Hat
-Text*, bordes y espaciados) para dar a los widgets nativos de Streamlit
-(botones, selects, inputs) una apariencia consistente con ese sistema de
-diseño.
+Tema **oscuro/neón** definido a partir de las recomendaciones de la skill
+`ui-ux-pro-max` (estilos *Dark Mode OLED* + acentos *Cyberpunk UI*):
 
-> **Nota técnica**: PatternFly es una librería de componentes React. Streamlit
-> renderiza sus propios widgets (no React de PatternFly), por lo que la
-> integración actual consiste en aplicar el CSS/tokens visuales de PatternFly
-> sobre los componentes de Streamlit, en lugar de usar los componentes React
-> originales. Una integración 1:1 con componentes PatternFly requeriría
-> desarrollar un *custom component* de Streamlit en JavaScript/React.
+| Token | Valor | Uso |
+|-------|-------|-----|
+| Fondo | `#0A0E27` | Fondo de la página |
+| Superficie | `#11163A` / `#171E4A` | Paneles, inputs |
+| Cian | `#00E5FF` | Acento principal, foco, encabezados de la grilla |
+| Magenta | `#FF2BD6` | Acento secundario (degradado del botón y del título) |
+| Texto | `#E6EAFF` / `#9AA3C7` | Texto principal / secundario |
+
+- Tipografía: **Fira Sans** (interfaz) y **Fira Code** (datos, coordenadas, títulos de sección).
+- Brillo neón moderado (sin animaciones *glitch* ni *scanlines*, para preservar
+  legibilidad); se respeta `prefers-reduced-motion`.
+- Todos los colores se fuerzan vía CSS, por lo que la app se ve igual con el
+  tema claro u oscuro de Streamlit/navegador.
 
 ## Instalación y ejecución local
 
 ```bash
-git clone https://github.com/<tu-usuario>/extractor_uh.git
+git clone https://github.com/gatojohn/extractor_uh.git
 cd extractor_uh
 python -m venv .venv
 source .venv/bin/activate  # En Windows: .venv\Scripts\activate
@@ -58,13 +66,12 @@ La aplicación quedará disponible en `http://localhost:8501`.
 
 ## Despliegue en Streamlit Community Cloud
 
-1. Subí este repositorio a GitHub (público).
-2. Entrá a [share.streamlit.io](https://share.streamlit.io/) e iniciá sesión
-   con tu cuenta de GitHub.
-3. Creá una nueva app, seleccioná este repositorio y rama, e indicá
-   `app.py` como archivo principal.
-4. Deploy. Streamlit instalará automáticamente las dependencias listadas en
-   `requirements.txt`.
+1. Entrar a [share.streamlit.io](https://share.streamlit.io/) con la cuenta de GitHub.
+2. Crear una nueva app, seleccionar este repositorio y la rama `master`, e
+   indicar `app.py` como archivo principal.
+3. Streamlit instala automáticamente las dependencias de `requirements.txt`.
+
+Demo: https://extractoruh.streamlit.app/
 
 ## Estructura del repositorio
 
@@ -78,8 +85,12 @@ La aplicación quedará disponible en `http://localhost:8501`.
 ## Roadmap (próximas versiones)
 
 - Reemplazar `simulate_ai_detection()` por la inferencia de un modelo real de
-  detección de inmuebles (por ejemplo, sobre imágenes satelitales/aéreas).
+  detección de inmuebles sobre imágenes satelitales/aéreas.
 - Persistir los polígonos y resultados (base de datos / almacenamiento).
 - Exportar la grilla de unidades habitacionales (CSV / GeoJSON).
 - Soportar múltiples polígonos por sesión.
-- Autenticación y manejo de usuarios/proyectos.
+
+## Créditos de mapas
+
+© colaboradores de [OpenStreetMap](https://www.openstreetmap.org/copyright) ·
+Imágenes satelitales © Esri.

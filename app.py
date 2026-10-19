@@ -5,6 +5,7 @@ simular la deteccion, mediante IA, de unidades habitacionales dentro del
 area seleccionada.
 """
 
+import html
 import random
 
 import folium
@@ -15,224 +16,239 @@ from streamlit_folium import st_folium
 
 st.set_page_config(page_title="Extractor UH", page_icon="\U0001F3E0", layout="wide")
 
-PATTERNFLY_CSS_CDN = "https://unpkg.com/@patternfly/patternfly@5.4.1/patternfly.min.css"
-
 
 def inject_theme() -> None:
-    """Carga el CSS de PatternFly y lo combina con la paleta/tipografia de un
-    design system tipo "Data-Dense Dashboard" (generado con la skill
-    ui-ux-pro-max) reestilizando los widgets nativos de Streamlit (no son
-    componentes React de PatternFly, sino una aproximacion visual via CSS)."""
+    """Tema oscuro/neon (Dark Mode OLED + acentos Cyberpunk, segun la skill
+    ui-ux-pro-max). Todos los colores se fuerzan explicitamente para que el
+    resultado sea el mismo con el tema claro u oscuro de Streamlit."""
     st.markdown(
-        f"""
-        <link rel="stylesheet" href="{PATTERNFLY_CSS_CDN}">
+        """
         <link rel="preconnect" href="https://fonts.googleapis.com">
         <link href="https://fonts.googleapis.com/css2?family=Fira+Sans:wght@400;500;600;700&family=Fira+Code:wght@400;500;600&display=swap" rel="stylesheet">
         <style>
-            :root {{
-                --color-primary: #3B82F6;
-                --color-secondary: #60A5FA;
-                --color-cta: #F97316;
-                --color-cta-hover: #EA670C;
-                --color-bg: #F8FAFC;
-                --color-surface: #FFFFFF;
-                --color-border: #E2E8F0;
-                --color-text: #1E293B;
-                --color-text-muted: #64748B;
-            }}
-            html, body, [class*="css"] {{
-                font-family: "Fira Sans", "Red Hat Text", Arial, sans-serif;
-                color: var(--color-text);
-            }}
-            [data-testid="stAppViewContainer"], [data-testid="stHeader"] {{
-                background-color: var(--color-bg);
-            }}
-            .pf-page-header {{
-                border-bottom: 1px solid var(--color-border);
-                padding-bottom: 0.75rem;
-                margin-bottom: 1rem;
-            }}
-            .pf-page-header h1 {{
-                color: var(--color-text);
-                font-weight: 700;
-                margin-bottom: 0.25rem;
-            }}
-            .pf-page-header p {{
-                color: var(--color-text-muted);
-                margin: 0;
-            }}
-            .pf-section-title {{
-                color: var(--color-text);
-                font-weight: 600;
-                font-size: 1.1rem;
-                border-left: 4px solid var(--color-primary);
-                padding-left: 0.6rem;
-                margin: 0.25rem 0 0.75rem 0;
-            }}
+            :root {
+                --bg: #0A0E27;
+                --bg-sidebar: #070A1C;
+                --surface: #11163A;
+                --surface-2: #171E4A;
+                --border: #273170;
+                --text: #E6EAFF;
+                --text-muted: #9AA3C7;
+                --cyan: #00E5FF;
+                --magenta: #FF2BD6;
+                --green: #2DFFB3;
+                --amber: #FFC14D;
+            }
 
-            /* Tarjetas: st.container(border=True) y st.expander quedan con
-               look de panel de dashboard (fondo blanco, borde suave, sombra). */
-            div[data-testid="stVerticalBlockBorderWrapper"],
-            div[data-testid="stExpander"] {{
-                background-color: var(--color-surface);
-                border: 1px solid var(--color-border) !important;
-                border-radius: 10px !important;
-                box-shadow: 0 1px 3px rgba(15, 23, 42, 0.06);
-            }}
-
-            div.stButton > button {{
-                background-color: var(--color-cta);
-                color: #ffffff;
-                border: 1px solid var(--color-cta);
-                border-radius: 6px;
-                font-weight: 600;
-                padding: 0.55rem 1.25rem;
-                cursor: pointer;
-                transition: background-color 150ms ease;
-            }}
-            div.stButton > button:hover {{
-                background-color: var(--color-cta-hover);
-                border-color: var(--color-cta-hover);
-                color: #ffffff;
-            }}
-            div.stButton > button:focus-visible,
-            div[data-baseweb="select"] > div:focus-within,
-            div[data-testid="stTextInput"] input:focus-visible,
-            div[data-testid="stNumberInput"] input:focus-visible {{
-                outline: 2px solid var(--color-primary) !important;
-                outline-offset: 2px !important;
-            }}
-            div[data-baseweb="select"] > div,
-            div[data-testid="stNumberInput"] input,
-            div[data-testid="stTextInput"] input {{
-                border-radius: 6px !important;
-                border-color: var(--color-border) !important;
-            }}
-
-            .pf-grid-header {{
-                background-color: #F1F5F9;
-                border-top: 1px solid var(--color-border);
-                border-bottom: 1px solid var(--color-border);
-                padding: 0.4rem 0;
-                font-weight: 600;
-                color: var(--color-text);
-            }}
-            .pf-grid-row {{
-                border-bottom: 1px solid #F1F5F9;
-                padding: 0.25rem 0;
+            /* Base */
+            .stApp, [data-testid="stAppViewContainer"] {
+                background:
+                    radial-gradient(1200px 600px at 85% -10%, rgba(255, 43, 214, 0.10), transparent 60%),
+                    radial-gradient(900px 500px at -10% 10%, rgba(0, 229, 255, 0.08), transparent 60%),
+                    var(--bg);
+                color: var(--text);
+                font-family: "Fira Sans", Arial, sans-serif;
+            }
+            header[data-testid="stHeader"] { background: transparent; }
+            .stApp p, .stApp label, .stApp li, .stApp h1, .stApp h2, .stApp h3 {
+                color: var(--text);
+                font-family: "Fira Sans", Arial, sans-serif;
+            }
+            [data-testid="stCaptionContainer"], [data-testid="stCaptionContainer"] p {
+                color: var(--text-muted) !important;
+            }
+            section[data-testid="stSidebar"] {
+                background: var(--bg-sidebar);
+                border-right: 1px solid var(--border);
+            }
+            section[data-testid="stSidebar"] h3 {
+                color: var(--cyan);
                 font-family: "Fira Code", monospace;
-                font-size: 0.9rem;
-                color: var(--color-text);
-            }}
+                font-size: 0.85rem;
+                letter-spacing: 0.08em;
+                text-transform: uppercase;
+            }
 
-            /* Resalta la fila completa al pasar el mouse (cada fila de la
-               grilla es un st.columns(), que Streamlit renderiza como un
-               stHorizontalBlock). */
-            div[data-testid="stExpander"] div[data-testid="stHorizontalBlock"] {{
-                transition: background-color 150ms ease;
-                border-radius: 6px;
-            }}
-            div[data-testid="stExpander"] div[data-testid="stHorizontalBlock"]:hover {{
-                background-color: #EFF6FF;
-            }}
+            /* Encabezado */
+            .uh-header { padding: 0.25rem 0 1rem 0; border-bottom: 1px solid var(--border); margin-bottom: 1.25rem; }
+            .uh-kicker {
+                font-family: "Fira Code", monospace; font-size: 0.75rem; letter-spacing: 0.14em;
+                text-transform: uppercase; color: var(--cyan);
+            }
+            .uh-title {
+                font-size: 2.4rem; font-weight: 700; margin: 0.2rem 0; line-height: 1.15;
+                background: linear-gradient(90deg, var(--cyan), var(--magenta));
+                -webkit-background-clip: text; background-clip: text; color: transparent;
+                filter: drop-shadow(0 0 12px rgba(0, 229, 255, 0.25));
+            }
+            .uh-subtitle { color: var(--text-muted); margin: 0; }
+            .uh-section-title {
+                font-family: "Fira Code", monospace; font-size: 0.85rem; font-weight: 600;
+                letter-spacing: 0.08em; text-transform: uppercase; color: var(--text);
+                border-left: 3px solid var(--cyan); padding-left: 0.6rem; margin: 0.25rem 0 0.5rem 0;
+            }
 
-            /* Evita que el layout salte al alternar entre st.info/st.success/st.warning */
-            div[data-testid="stAlert"] {{
-                min-height: 52px;
-                display: flex;
-                align-items: center;
-            }}
+            /* Paneles */
+            div[data-testid="stVerticalBlock"]:has(> div[data-testid="stElementContainer"] .uh-section-title),
+            div[data-testid="stExpander"] details {
+                background: var(--surface) !important;
+                border: 1px solid var(--border) !important;
+                border-radius: 12px !important;
+            }
+            div[data-testid="stExpander"] summary {
+                background: var(--surface) !important;
+                color: var(--text) !important;
+                border-radius: 12px;
+            }
+            div[data-testid="stExpander"] summary p {
+                font-family: "Fira Code", monospace; font-size: 0.85rem; font-weight: 600;
+                letter-spacing: 0.08em; text-transform: uppercase; color: var(--text) !important;
+            }
+            div[data-testid="stExpander"] summary:hover p,
+            div[data-testid="stExpander"] summary svg { color: var(--cyan) !important; fill: var(--cyan) !important; }
+            div[data-testid="stExpanderDetails"] { background: var(--surface) !important; }
+
+            /* Mapa */
+            iframe[title*="st_folium"] {
+                border-radius: 10px;
+                box-shadow: 0 0 0 1px var(--border), 0 0 28px rgba(0, 229, 255, 0.12);
+            }
+
+            /* Boton principal: misma altura que el indicador de estado */
+            div.stButton > button {
+                min-height: 48px; width: 100%;
+                background: linear-gradient(90deg, var(--cyan), var(--magenta));
+                border: none; border-radius: 10px; cursor: pointer;
+                transition: box-shadow 200ms ease, filter 200ms ease;
+            }
+            div.stButton > button p {
+                color: #0A0E27 !important; font-weight: 700; white-space: nowrap;
+            }
+            div.stButton > button:hover {
+                box-shadow: 0 0 18px rgba(0, 229, 255, 0.45), 0 0 28px rgba(255, 43, 214, 0.30);
+                filter: brightness(1.08);
+            }
+            div.stButton > button:focus-visible {
+                outline: 2px solid var(--text) !important; outline-offset: 3px;
+            }
+
+            /* Indicador de estado */
+            .uh-status {
+                min-height: 48px; display: flex; align-items: center; gap: 0.6rem;
+                padding: 0 1rem; border-radius: 10px; border: 1px solid;
+                font-size: 0.95rem; background: var(--surface-2);
+            }
+            .uh-status::before {
+                content: ""; width: 8px; height: 8px; border-radius: 50%;
+                background: currentColor; box-shadow: 0 0 8px currentColor; flex: none;
+            }
+            .uh-status span { color: var(--text); }
+            .uh-status-info { color: var(--cyan); border-color: rgba(0, 229, 255, 0.35); }
+            .uh-status-success { color: var(--green); border-color: rgba(45, 255, 179, 0.35); }
+            .uh-status-warning { color: var(--amber); border-color: rgba(255, 193, 77, 0.40); }
+
+            /* Inputs, selects y number inputs */
+            div[data-testid="stNumberInputContainer"],
+            div[data-testid="stTextInputRootElement"],
+            div[data-testid="stSelectbox"] div[role="group"] {
+                background: var(--surface-2) !important;
+                border: 1px solid var(--border) !important;
+                border-radius: 8px !important;
+            }
+            div[data-testid="stNumberInputContainer"]:focus-within,
+            div[data-testid="stTextInputRootElement"]:focus-within,
+            div[data-testid="stSelectbox"] div[role="group"]:focus-within {
+                border-color: var(--cyan) !important;
+                box-shadow: 0 0 0 1px var(--cyan), 0 0 10px rgba(0, 229, 255, 0.35);
+            }
+            .stApp input {
+                color: var(--text) !important; -webkit-text-fill-color: var(--text);
+                caret-color: var(--cyan); font-family: "Fira Code", monospace;
+            }
+            div[data-testid="stSelectbox"] svg { color: var(--text) !important; }
+            div[data-testid="stNumberInputContainer"] button {
+                background: var(--surface-2) !important; color: var(--text) !important;
+            }
+            div[data-testid="stNumberInputContainer"] button:hover {
+                background: var(--border) !important; color: var(--cyan) !important;
+            }
+            [role="listbox"], [role="listbox"] [role="option"] {
+                background: var(--surface-2) !important; color: var(--text) !important;
+            }
+            [role="listbox"] [role="option"]:hover, [role="listbox"] [role="option"][aria-selected="true"] {
+                background: var(--border) !important; color: var(--cyan) !important;
+            }
+
+            /* Sliders: el rojo por defecto de Streamlit se rota a cian (el texto
+               blanco del valor no se ve afectado por hue-rotate). */
+            div[data-testid="stSlider"] div[role="group"] { filter: hue-rotate(186deg) saturate(1.4); }
+            div[data-testid="stSlider"] [data-testid="stSliderTickBarMin"],
+            div[data-testid="stSlider"] [data-testid="stSliderTickBarMax"] { color: var(--text-muted); }
+
+            /* Grilla */
+            .uh-grid-header {
+                font-family: "Fira Code", monospace; font-size: 0.75rem; font-weight: 600;
+                letter-spacing: 0.08em; text-transform: uppercase; color: var(--cyan);
+                padding: 0.5rem 0; border-bottom: 1px solid rgba(0, 229, 255, 0.35);
+            }
+            .uh-grid-cell {
+                font-family: "Fira Code", monospace; font-size: 0.9rem; color: var(--text);
+                min-height: 40px; display: flex; align-items: center;
+            }
+            .uh-grid-muted { color: var(--text-muted); }
+            /* Streamlit aplica margin-bottom: -16px a cada markdown, lo que
+               desalinea las celdas de texto respecto de los inputs de la fila. */
+            div[data-testid="stMarkdownContainer"]:has(.uh-grid-cell),
+            div[data-testid="stMarkdownContainer"]:has(.uh-grid-header) { margin-bottom: 0; }
+            div[data-testid="stExpanderDetails"] div[data-testid="stHorizontalBlock"] {
+                border-radius: 8px; transition: background-color 150ms ease;
+            }
+            div[data-testid="stExpanderDetails"] div[data-testid="stHorizontalBlock"]:hover {
+                background: rgba(0, 229, 255, 0.06);
+            }
+
+            @media (prefers-reduced-motion: reduce) {
+                * { transition: none !important; }
+            }
         </style>
         """,
         unsafe_allow_html=True,
     )
 
 
-inject_theme()
+LEAFLET_DARK_CSS = """
+<style>
+    .leaflet-container { background: #0A0E27 !important; }
+    .uh-dark-tiles { filter: invert(1) hue-rotate(200deg) brightness(0.85) contrast(0.9) saturate(0.6); }
+    .leaflet-bar a, .leaflet-control-layers, .leaflet-draw-actions a {
+        background-color: #11163A !important; color: #E6EAFF !important;
+        border-color: #273170 !important;
+    }
+    .leaflet-bar a:hover, .leaflet-draw-actions a:hover { background-color: #273170 !important; color: #00E5FF !important; }
+    .leaflet-bar, .leaflet-control-layers { border: 1px solid #273170 !important; box-shadow: 0 0 12px rgba(0, 229, 255, 0.18) !important; }
+    .leaflet-draw-toolbar a { filter: invert(1) hue-rotate(180deg); background-color: #E6EAFF !important; }
+    .leaflet-control-layers-expanded { color: #E6EAFF !important; padding: 8px 10px; }
+    .leaflet-control-attribution, .leaflet-control-scale-line {
+        background: rgba(10, 14, 39, 0.75) !important; color: #9AA3C7 !important; border-color: #273170 !important;
+    }
+    .leaflet-control-attribution a { color: #00E5FF !important; }
+</style>
+"""
 
-st.markdown(
-    """
-    <div class="pf-page-header">
-        <h1>Extractor UH</h1>
-        <p>Dibuje un pol&iacute;gono sobre el mapa y simule la identificaci&oacute;n de
-        unidades habitacionales mediante un modelo de IA.</p>
-    </div>
-    """,
-    unsafe_allow_html=True,
-)
 
-if "units" not in st.session_state:
-    st.session_state.units = []
-if "polygon_coords" not in st.session_state:
-    st.session_state.polygon_coords = None
-if "detection_run_id" not in st.session_state:
-    st.session_state.detection_run_id = 0
-
-with st.sidebar:
-    st.markdown("### Configuración del mapa")
-    center_lat = st.number_input("Latitud centro", value=40.4168, format="%.6f")
-    center_lon = st.number_input("Longitud centro", value=-3.7038, format="%.6f")
-    zoom = st.slider("Zoom inicial", min_value=2, max_value=20, value=17)
-    map_height = st.slider("Altura del mapa (px)", min_value=400, max_value=1000, value=750, step=50)
-
-with st.container(border=True):
-    st.markdown('<div class="pf-section-title">1. Dibuje el área de interés</div>', unsafe_allow_html=True)
-    st.caption("Use la herramienta de polígono del mapa (icono de pentágono) para trazar un área cerrada.")
-
-    folium_map = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, control_scale=True)
-    Draw(
-        export=False,
-        draw_options={
-            "polygon": True,
-            "rectangle": False,
-            "circle": False,
-            "circlemarker": False,
-            "marker": False,
-            "polyline": False,
-        },
-        edit_options={"edit": True, "remove": True},
-    ).add_to(folium_map)
-
-    map_figure = folium.Figure(height=map_height)
-    map_figure.add_child(folium_map)
-
-    # returned_objects se limita a los dibujos: por defecto st_folium tambien
-    # devuelve center/zoom/bounds, que cambian con cada pan o zoom y disparan un
-    # rerun completo (remontando el componente), lo que causa el efecto visual
-    # de "se agranda y se achica". Al no observar esos campos, el mapa solo
-    # vuelve a correr el script cuando el usuario efectivamente dibuja algo.
-    map_state = st_folium(
-        map_figure,
-        height=map_height,
-        use_container_width=True,
-        returned_objects=["all_drawings", "last_active_drawing"],
-        key="main_map",
+def status(kind: str, text: str) -> None:
+    st.markdown(
+        f'<div class="uh-status uh-status-{kind}" role="status" aria-live="polite">'
+        f"<span>{html.escape(text)}</span></div>",
+        unsafe_allow_html=True,
     )
-
-    drawing = None
-    if map_state:
-        drawing = map_state.get("last_active_drawing")
-        if not drawing and map_state.get("all_drawings"):
-            drawing = map_state["all_drawings"][-1]
-
-    if drawing and drawing.get("geometry", {}).get("type") == "Polygon":
-        st.session_state.polygon_coords = drawing["geometry"]["coordinates"][0]
-
-    col_button, col_status = st.columns([1, 3])
-    with col_button:
-        run_detection = st.button("Obtener unidades habitacionales", type="primary", use_container_width=True)
-    with col_status:
-        if st.session_state.polygon_coords:
-            st.success(f"Polígono capturado con {len(st.session_state.polygon_coords)} vértices.")
-        else:
-            st.info("Dibuje un polígono cerrado sobre el mapa para habilitar el análisis.")
 
 
 def simulate_ai_detection(coords):
     """Simula la salida de un modelo de IA que identifica unidades
-    habitacionales dentro del polígono dibujado. Por ahora genera inmuebles
-    de ejemplo distribuidos aleatoriamente dentro del área; en una versión
-    futura esta función se reemplaza por la inferencia del modelo real."""
+    habitacionales dentro del poligono dibujado. Genera inmuebles de ejemplo
+    distribuidos aleatoriamente dentro del area; en una version futura se
+    reemplaza por la inferencia del modelo real."""
     polygon = Polygon([(lon, lat) for lon, lat in coords])
     min_lon, min_lat, max_lon, max_lat = polygon.bounds
 
@@ -260,13 +276,110 @@ def simulate_ai_detection(coords):
     return units
 
 
-if run_detection:
-    if not st.session_state.polygon_coords:
-        st.warning("Primero dibuje un polígono cerrado sobre el mapa.")
-    else:
-        with st.spinner("Analizando el área seleccionada con el modelo de IA (simulado)..."):
-            st.session_state.units = simulate_ai_detection(st.session_state.polygon_coords)
-            st.session_state.detection_run_id += 1
+inject_theme()
+
+st.markdown(
+    """
+    <div class="uh-header">
+        <div class="uh-kicker">Detecci&oacute;n asistida por IA &middot; v0 simulada</div>
+        <div class="uh-title">Extractor UH</div>
+        <p class="uh-subtitle">Dibuje un pol&iacute;gono sobre el mapa y obtenga las unidades
+        habitacionales identificadas dentro del &aacute;rea.</p>
+    </div>
+    """,
+    unsafe_allow_html=True,
+)
+
+if "units" not in st.session_state:
+    st.session_state.units = []
+if "polygon_coords" not in st.session_state:
+    st.session_state.polygon_coords = None
+if "detection_run_id" not in st.session_state:
+    st.session_state.detection_run_id = 0
+
+with st.sidebar:
+    st.markdown("### Configuración del mapa")
+    center_lat = st.number_input("Latitud centro", value=40.4168, format="%.6f")
+    center_lon = st.number_input("Longitud centro", value=-3.7038, format="%.6f")
+    zoom = st.slider("Zoom inicial", min_value=2, max_value=20, value=17)
+    map_height = st.slider("Altura del mapa (px)", min_value=500, max_value=1200, value=800, step=50)
+
+with st.container(border=True):
+    st.markdown('<div class="uh-section-title">1. Dibuje el área de interés</div>', unsafe_allow_html=True)
+    st.caption(
+        "Use la herramienta de polígono (pentágono, a la izquierda del mapa) para trazar un área cerrada. "
+        "Puede alternar entre mapa oscuro y satelital en el control de capas."
+    )
+
+    folium_map = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, control_scale=True, tiles=None)
+    # Mapa oscuro: tiles de OpenStreetMap invertidos via CSS (LEAFLET_DARK_CSS),
+    # ya que los tiles oscuros de CARTO ahora requieren API key.
+    folium.TileLayer("OpenStreetMap", name="Oscuro", className="uh-dark-tiles").add_to(folium_map)
+    folium.TileLayer(
+        tiles="https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+        attr="Tiles &copy; Esri",
+        name="Satelital",
+        show=False,
+    ).add_to(folium_map)
+    folium_map.get_root().header.add_child(folium.Element(LEAFLET_DARK_CSS))
+    Draw(
+        export=False,
+        draw_options={
+            "polygon": {"shapeOptions": {"color": "#00E5FF", "fillColor": "#FF2BD6", "fillOpacity": 0.15}},
+            "rectangle": False,
+            "circle": False,
+            "circlemarker": False,
+            "marker": False,
+            "polyline": False,
+        },
+        edit_options={"edit": True, "remove": True},
+    ).add_to(folium_map)
+    folium.LayerControl(position="topright").add_to(folium_map)
+
+    # returned_objects se limita a los dibujos: por defecto st_folium tambien
+    # devuelve center/zoom/bounds, que cambian con cada pan o zoom y disparan un
+    # rerun completo que remonta el componente (efecto de "se agranda y se achica").
+    map_state = st_folium(
+        folium_map,
+        height=map_height,
+        use_container_width=True,
+        returned_objects=["all_drawings", "last_active_drawing"],
+        key="main_map",
+    )
+
+    drawing = None
+    if map_state:
+        drawing = map_state.get("last_active_drawing")
+        if not drawing and map_state.get("all_drawings"):
+            drawing = map_state["all_drawings"][-1]
+
+    if drawing and drawing.get("geometry", {}).get("type") == "Polygon":
+        st.session_state.polygon_coords = drawing["geometry"]["coordinates"][0]
+
+    col_button, col_status = st.columns([1.2, 2.8], vertical_alignment="center")
+    with col_button:
+        run_detection = st.button("Obtener unidades habitacionales", type="primary")
+    with col_status:
+        polygon_coords = st.session_state.polygon_coords
+        # El anillo GeoJSON repite el primer vertice al final para cerrarlo.
+        n_vertices = len(polygon_coords) - 1 if polygon_coords else 0
+
+        if run_detection and not polygon_coords:
+            status("warning", "Primero dibuje un polígono cerrado sobre el mapa.")
+        else:
+            if run_detection:
+                st.session_state.units = simulate_ai_detection(polygon_coords)
+                st.session_state.detection_run_id += 1
+
+            if st.session_state.units:
+                status(
+                    "success",
+                    f"Polígono de {n_vertices} vértices · {len(st.session_state.units)} unidades detectadas.",
+                )
+            elif polygon_coords:
+                status("success", f"Polígono capturado con {n_vertices} vértices. Listo para analizar.")
+            else:
+                status("info", "Dibuje un polígono cerrado sobre el mapa para habilitar el análisis.")
 
 with st.expander("2. Unidades habitacionales detectadas", expanded=True):
     if not st.session_state.units:
@@ -280,22 +393,22 @@ with st.expander("2. Unidades habitacionales detectadas", expanded=True):
             header_cols,
             ["#", "Nombre del inmueble", "Coordenadas (lat, lon)", "Tipo", "Pisos", "Apartamentos"],
         ):
-            col.markdown(f"<div class='pf-grid-header'>{label}</div>", unsafe_allow_html=True)
+            col.markdown(f"<div class='uh-grid-header'>{label}</div>", unsafe_allow_html=True)
 
         tipo_options = ["Casa", "Edificio"]
 
         for unit in st.session_state.units:
-            row_cols = st.columns(column_widths)
+            row_cols = st.columns(column_widths, vertical_alignment="center")
             key_prefix = f"{run_id}_{unit['id']}"
 
-            row_cols[0].markdown(f"<div class='pf-grid-row'>{unit['id']}</div>", unsafe_allow_html=True)
+            row_cols[0].markdown(f"<div class='uh-grid-cell'>{unit['id']}</div>", unsafe_allow_html=True)
 
             unit["nombre"] = row_cols[1].text_input(
                 "Nombre", value=unit["nombre"], key=f"nombre_{key_prefix}", label_visibility="collapsed"
             )
 
             row_cols[2].markdown(
-                f"<div class='pf-grid-row'>{unit['lat']}, {unit['lon']}</div>", unsafe_allow_html=True
+                f"<div class='uh-grid-cell'>{unit['lat']}, {unit['lon']}</div>", unsafe_allow_html=True
             )
 
             unit["tipo"] = row_cols[3].selectbox(
@@ -326,5 +439,5 @@ with st.expander("2. Unidades habitacionales detectadas", expanded=True):
             else:
                 unit["pisos"] = None
                 unit["apartamentos"] = None
-                row_cols[4].markdown("<div class='pf-grid-row'>&mdash;</div>", unsafe_allow_html=True)
-                row_cols[5].markdown("<div class='pf-grid-row'>&mdash;</div>", unsafe_allow_html=True)
+                row_cols[4].markdown("<div class='uh-grid-cell uh-grid-muted'>&mdash;</div>", unsafe_allow_html=True)
+                row_cols[5].markdown("<div class='uh-grid-cell uh-grid-muted'>&mdash;</div>", unsafe_allow_html=True)
