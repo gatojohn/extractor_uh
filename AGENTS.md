@@ -60,6 +60,12 @@ cuántas viviendas tiene la zona.
   center/zoom/bounds, cada movimiento del mapa recarga la página y el mapa parpadea.
 - **Tiles:** la capa "Oscuro" es OpenStreetMap con un filtro CSS (los tiles oscuros de
   CARTO piden API key). La capa "Satelital" es Esri World Imagery. Mantén las atribuciones.
+- **Techos en el mapa:** cada unidad guarda su contorno en `huella` (`contorno_techo()`).
+  Se dibujan con `capa_techos()` y se pasan a `st_folium(feature_group_to_add=...)`, que
+  actualiza la capa sin volver a montar el mapa: así se conservan el polígono dibujado y
+  la vista. Como el mapa se dibuja antes que el botón, tras analizar se hace `st.rerun()`
+  y el mensaje de error se guarda en `st.session_state.error_analisis`. El color del techo
+  y el tooltip leen los valores actuales de la grilla desde `st.session_state`.
 - **Grilla:** cada fila es un `st.columns()`. Las claves de los widgets llevan
   `detection_run_id` para que un análisis nuevo no herede valores del anterior.
 
@@ -72,7 +78,8 @@ cuántas viviendas tiene la zona.
 - Casos de prueba (entrada → lo que esperamos):
   1. Polígono sobre una manzana residencial + botón → grilla con inmuebles numerados desde 1,
      todos dentro del polígono, y mensaje con el total detectado.
-  2. Cambiar el tipo de una fila a "Edificio" → aparecen Pisos y Apartamentos solo en esa fila.
+  2. Cambiar el tipo de una fila a "Edificio" → aparecen Pisos y Apartamentos solo en esa
+     fila y su techo pasa de cian a magenta en el mapa, sin perder el polígono dibujado.
   3. Pulsar el botón sin polígono → "Primero dibuje un polígono cerrado sobre el mapa." y no
      se llama a la IA.
   4. Polígono sobre un parque o el agua → "No se encontraron unidades habitacionales en el

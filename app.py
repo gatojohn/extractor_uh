@@ -19,7 +19,8 @@ from folium.plugins import Draw
 from huggingface_hub import hf_hub_download
 from PIL import Image, ImageDraw
 from scipy import ndimage
-from shapely.geometry import Point, Polygon
+from shapely.geometry import Point, Polygon, box
+from shapely.ops import unary_union
 from streamlit_folium import st_folium
 
 st.set_page_config(page_title="Extractor UH", page_icon="\U0001F3E0", layout="wide")
@@ -135,6 +136,17 @@ def inject_theme() -> None:
                 border-radius: 10px;
                 box-shadow: 0 0 0 1px var(--border), 0 0 28px rgba(0, 229, 255, 0.12);
             }
+
+            /* Leyenda de los techos dibujados sobre el mapa */
+            .uh-legend {
+                display: flex; flex-wrap: wrap; align-items: center; gap: 0.4rem 1.25rem;
+                font-size: 0.85rem; color: var(--text-muted); margin: 0.25rem 0 0.5rem 0;
+            }
+            .uh-legend-item { display: inline-flex; align-items: center; gap: 0.4rem; color: var(--text); }
+            .uh-legend-item i { width: 14px; height: 14px; border-radius: 3px; display: inline-block; }
+            .uh-legend-casa { background: rgba(0, 229, 255, 0.35); border: 1.5px solid var(--cyan); }
+            .uh-legend-edificio { background: rgba(255, 43, 214, 0.35); border: 1.5px solid var(--magenta); }
+            .uh-legend-area { border: 2px dashed var(--amber); }
 
             /* Boton principal: misma altura que el indicador de estado */
             div.stButton > button {
@@ -254,8 +266,40 @@ LEAFLET_DARK_CSS = """
         background: rgba(10, 14, 39, 0.75) !important; color: #9AA3C7 !important; border-color: #273170 !important;
     }
     .leaflet-control-attribution a { color: #00E5FF !important; }
+    .leaflet-tooltip {
+        background: #11163A; color: #E6EAFF; border: 1px solid #273170;
+        font-family: "Fira Code", monospace; font-size: 12px;
+        box-shadow: 0 0 12px rgba(0, 229, 255, 0.25);
+    }
+    .leaflet-tooltip-top:before { border-top-color: #273170; }
 </style>
 """
+
+
+# Mismos tonos que --cyan / --magenta: Leaflet aplica los colores como atributos
+# SVG, donde no se pueden usar variables CSS.
+COLOR_TIPO = {"Casa": "#00E5FF", "Edificio": "#FF2BD6"}
+COLOR_AREA_DIBUJADA = "#FFC14D"
+
+
+def capa_techos(units, run_id) -> folium.FeatureGroup:
+    capa = folium.FeatureGroup(name="Techos detectados")
+    for unit in units:
+        # Se leen los valores actuales de la grilla: el mapa se dibuja antes que ella.
+        clave = f"{run_id}_{unit['id']}"
+        nombre = st.session_state.get(f"nombre_{clave}", unit["nombre"])
+        tipo = st.session_state.get(f"tipo_{clave}", unit["tipo"])
+        color = COLOR_TIPO[tipo]
+        folium.Polygon(
+            locations=unit["huella"],
+            color=color,
+            weight=1.5,
+            fill=True,
+            fill_color=color,
+            fill_opacity=0.35,
+            tooltip=f"{unit['id']}. {html.escape(nombre)} · {tipo} · {unit['area_m2']} m²",
+        ).add_to(capa)
+    return capa
 
 
 def status(kind: str, text: str) -> None:
@@ -314,6 +358,24 @@ def descargar_mosaico(tx0: int, ty0: int, cols: int, rows: int, zoom: int) -> Im
     return mosaico
 
 
+def contorno_techo(mascara: np.ndarray) -> list[tuple[float, float]]:
+    """Contorno exterior (en pixeles de la mascara) de un techo: une los tramos
+    horizontales de pixeles de cada fila y simplifica el borde escalonado."""
+    tramos = []
+    for fila, valores in enumerate(mascara):
+        columnas = np.flatnonzero(valores)
+        if columnas.size == 0:
+            continue
+        cortes = np.flatnonzero(np.diff(columnas) > 1)
+        inicios = np.r_[columnas[0], columnas[cortes + 1]]
+        fines = np.r_[columnas[cortes], columnas[-1]] + 1
+        tramos.extend(box(c0, fila, c1, fila + 1) for c0, c1 in zip(inicios, fines))
+    forma = unary_union(tramos).simplify(1.0)
+    if forma.geom_type == "MultiPolygon":
+        forma = max(forma.geoms, key=lambda g: g.area)
+    return list(forma.exterior.coords)
+
+
 def detect_units(coords):
     """Detecta con el modelo de Hugging Face las huellas de edificios dentro
     del poligono (imagen satelital de Esri) y devuelve una unidad por cada
@@ -365,14 +427,21 @@ def detect_units(coords):
     indices = range(1, total + 1)
     areas = ndimage.sum(edificios, etiquetas, indices) * metros_por_pixel**2
     centros = ndimage.center_of_mass(edificios, etiquetas, indices)
+    recortes = ndimage.find_objects(etiquetas)
 
     candidatos = []
-    for area, (fila, columna) in zip(areas, centros):
+    for etiqueta, area, (fila, columna), recorte in zip(indices, areas, centros, recortes):
         if area < AREA_MINIMA_M2:
             continue
         lon, lat = pixel_a_lonlat(origen_x + columna + 0.5, origen_y + fila + 0.5, zoom)
-        if polygon.contains(Point(lon, lat)):
-            candidatos.append((lat, lon, area))
+        if not polygon.contains(Point(lon, lat)):
+            continue
+        fila0, columna0 = recorte[0].start, recorte[1].start
+        huella = []
+        for x, y in contorno_techo(etiquetas[recorte] == etiqueta):
+            lon_v, lat_v = pixel_a_lonlat(origen_x + columna0 + x, origen_y + fila0 + y, zoom)
+            huella.append([round(lat_v, 6), round(lon_v, 6)])
+        candidatos.append((lat, lon, area, huella))
     # De norte a sur y de oeste a este, para una numeracion facil de seguir en el mapa.
     candidatos.sort(key=lambda c: (-round(c[0], 4), c[1]))
 
@@ -386,8 +455,9 @@ def detect_units(coords):
             "pisos": None,
             "apartamentos": None,
             "area_m2": round(area),
+            "huella": huella,
         }
-        for i, (lat, lon, area) in enumerate(candidatos, start=1)
+        for i, (lat, lon, area, huella) in enumerate(candidatos, start=1)
     ]
 
 
@@ -413,6 +483,8 @@ if "detection_run_id" not in st.session_state:
     st.session_state.detection_run_id = 0
 if "analizado" not in st.session_state:
     st.session_state.analizado = False
+if "error_analisis" not in st.session_state:
+    st.session_state.error_analisis = None
 
 with st.sidebar:
     st.markdown("### Configuración del mapa")
@@ -443,7 +515,14 @@ with st.container(border=True):
     Draw(
         export=False,
         draw_options={
-            "polygon": {"shapeOptions": {"color": "#00E5FF", "fillColor": "#FF2BD6", "fillOpacity": 0.15}},
+            "polygon": {
+                "shapeOptions": {
+                    "color": COLOR_AREA_DIBUJADA,
+                    "weight": 2,
+                    "dashArray": "6 6",
+                    "fillOpacity": 0.04,
+                }
+            },
             "rectangle": False,
             "circle": False,
             "circlemarker": False,
@@ -457,13 +536,28 @@ with st.container(border=True):
     # returned_objects se limita a los dibujos: por defecto st_folium tambien
     # devuelve center/zoom/bounds, que cambian con cada pan o zoom y disparan un
     # rerun completo que remonta el componente (efecto de "se agranda y se achica").
+    # Los techos van en feature_group_to_add: st_folium actualiza esa capa sin
+    # volver a montar el mapa, asi el poligono dibujado y la vista se conservan.
+    techos = capa_techos(st.session_state.units, st.session_state.detection_run_id) if st.session_state.units else None
     map_state = st_folium(
         folium_map,
         height=map_height,
         use_container_width=True,
         returned_objects=["all_drawings", "last_active_drawing"],
+        feature_group_to_add=techos,
         key="main_map",
     )
+
+    if st.session_state.units:
+        st.markdown(
+            "<div class='uh-legend'>"
+            "<span class='uh-legend-item'><i class='uh-legend-casa'></i>Casa</span>"
+            "<span class='uh-legend-item'><i class='uh-legend-edificio'></i>Edificio</span>"
+            "<span class='uh-legend-item'><i class='uh-legend-area'></i>Área analizada</span>"
+            "<span class='uh-legend-hint'>Pase el mouse sobre un techo para ver de qué inmueble se trata.</span>"
+            "</div>",
+            unsafe_allow_html=True,
+        )
 
     drawing = None
     if map_state:
@@ -472,7 +566,10 @@ with st.container(border=True):
             drawing = map_state["all_drawings"][-1]
 
     if drawing and drawing.get("geometry", {}).get("type") == "Polygon":
-        st.session_state.polygon_coords = drawing["geometry"]["coordinates"][0]
+        nuevas_coords = drawing["geometry"]["coordinates"][0]
+        if nuevas_coords != st.session_state.polygon_coords:
+            st.session_state.polygon_coords = nuevas_coords
+            st.session_state.error_analisis = None
 
     col_button, col_status = st.columns([1.2, 2.8], vertical_alignment="center")
     with col_button:
@@ -482,20 +579,22 @@ with st.container(border=True):
         # El anillo GeoJSON repite el primer vertice al final para cerrarlo.
         n_vertices = len(polygon_coords) - 1 if polygon_coords else 0
 
-        error_analisis = None
         if run_detection and polygon_coords:
             try:
                 with st.spinner("Analizando la imagen satelital con IA..."):
                     st.session_state.units = detect_units(polygon_coords)
                 st.session_state.detection_run_id += 1
                 st.session_state.analizado = True
+                st.session_state.error_analisis = None
             except AnalisisError as error:
-                error_analisis = str(error)
+                st.session_state.error_analisis = str(error)
+            # El mapa ya se dibujo en esta ejecucion: se repite para mostrar los techos.
+            st.rerun()
 
         if run_detection and not polygon_coords:
             status("warning", "Primero dibuje un polígono cerrado sobre el mapa.")
-        elif error_analisis:
-            status("warning", error_analisis)
+        elif st.session_state.error_analisis:
+            status("warning", st.session_state.error_analisis)
         else:
             if st.session_state.analizado and not st.session_state.units:
                 status("warning", "No se encontraron unidades habitacionales en el área.")

@@ -25,7 +25,8 @@
    cerrado sobre la zona que le interesa.
 2. Al pulsar **"Obtener unidades habitacionales"**, un modelo de IA analiza la imagen
    satelital del polígono y devuelve la lista de edificios que encuentra dentro, con sus
-   coordenadas.
+   coordenadas. Los techos detectados se dibujan sobre el mapa (cian = casa, magenta =
+   edificio), con su número y nombre al pasar el mouse.
 3. Presenta los resultados en una grilla editable: número de fila, nombre del inmueble
    ("Inmueble 1", "Inmueble 2"… si no tiene nombre), coordenadas, tipo (Casa / Edificio) y,
    si es un edificio, número de pisos y de apartamentos.
@@ -111,7 +112,6 @@ La app está bien si:
 
 ## 8. Fuera de alcance (por ahora)
 
-- Dibujar sobre el mapa los techos detectados, para comprobar el resultado de un vistazo.
 - Clasificar casa / edificio y estimar pisos con un modelo, en lugar de por el tamaño del
   techo.
 - Exportar la grilla a CSV o GeoJSON.

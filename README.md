@@ -16,7 +16,10 @@ que hay dentro del área seleccionada.
    el usuario traza con el mouse un área cerrada. Se puede editar o borrar.
 3. **Botón "Obtener unidades habitacionales"**: el modelo de IA analiza la
    imagen satelital del área delimitada (hasta 0,5 km²) y detecta los techos de
-   los edificios. Un indicador de estado junto al botón informa los vértices
+   los edificios. Los techos se dibujan sobre el mapa (cian = casa, magenta =
+   edificio) y, al pasar el mouse, muestran número, nombre, tipo y superficie;
+   el color se actualiza si se cambia el tipo en la grilla. Un indicador de
+   estado junto al botón informa los vértices
    capturados y las unidades detectadas. También avisa si no se dibujó el
    polígono, si la zona es demasiado grande, si no se encontraron viviendas o
    si falló la descarga de imágenes.
@@ -109,7 +112,6 @@ Demo: https://extractoruh.streamlit.app/
 
 ## Roadmap (próximas versiones)
 
-- Dibujar sobre el mapa los techos detectados para validar el resultado a simple vista.
 - Clasificar casa / edificio y estimar pisos con un modelo, en lugar de por el
   tamaño del techo.
 - Persistir los polígonos y resultados (base de datos / almacenamiento).
