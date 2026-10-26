@@ -1,20 +1,42 @@
-"""Extractor UH - v0.
+"""Extractor UH.
 
 Aplicacion Streamlit que permite dibujar un poligono cerrado sobre un mapa y
-simular la deteccion, mediante IA, de unidades habitacionales dentro del
-area seleccionada.
+detectar, con un modelo de IA de Hugging Face, las unidades habitacionales
+dentro del area seleccionada.
 """
 
 import html
-import random
+import math
+from concurrent.futures import ThreadPoolExecutor
+from io import BytesIO
 
 import folium
+import numpy as np
+import onnxruntime as ort
+import requests
 import streamlit as st
 from folium.plugins import Draw
+from huggingface_hub import hf_hub_download
+from PIL import Image, ImageDraw
+from scipy import ndimage
 from shapely.geometry import Point, Polygon
 from streamlit_folium import st_folium
 
 st.set_page_config(page_title="Extractor UH", page_icon="\U0001F3E0", layout="wide")
+
+# Modelo U-Net de segmentacion de huellas de edificios. Solo se publica en ONNX
+# (para la libreria JavaScript GeoAI.js), por lo que transformers.pipeline no
+# puede cargarlo: se ejecuta con onnxruntime replicando el pre/postproceso de
+# GeoAI.js (parches RGB 256x256 en [0, 1], umbral 0.3, componentes conexas).
+MODELO = "geobase/building-footprint-segmentation"
+MODELO_ARCHIVO = "onnx/model_quantized.onnx"
+ESRI_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
+TILE = 256
+ZOOM_ANALISIS = 18  # ~0,6 m/pixel: en pruebas segmenta mejor que 17 o 19
+AREA_MAXIMA_KM2 = 0.5
+UMBRAL_CONFIANZA = 0.3
+AREA_MINIMA_M2 = 25
+AREA_EDIFICIO_M2 = 300  # heuristica: techos mayores se proponen como "Edificio"
 
 
 def inject_theme() -> None:
@@ -244,36 +266,129 @@ def status(kind: str, text: str) -> None:
     )
 
 
-def simulate_ai_detection(coords):
-    """Simula la salida de un modelo de IA que identifica unidades
-    habitacionales dentro del poligono dibujado. Genera inmuebles de ejemplo
-    distribuidos aleatoriamente dentro del area; en una version futura se
-    reemplaza por la inferencia del modelo real."""
-    polygon = Polygon([(lon, lat) for lon, lat in coords])
-    min_lon, min_lat, max_lon, max_lat = polygon.bounds
+class AnalisisError(Exception):
+    """Error con un mensaje listo para mostrar al usuario."""
 
-    n_units = random.randint(4, 10)
-    units = []
-    attempts = 0
-    while len(units) < n_units and attempts < n_units * 50:
-        attempts += 1
-        lon = random.uniform(min_lon, max_lon)
-        lat = random.uniform(min_lat, max_lat)
+
+@st.cache_resource(show_spinner=False)
+def cargar_modelo() -> ort.InferenceSession:
+    ruta = hf_hub_download(MODELO, MODELO_ARCHIVO)
+    return ort.InferenceSession(ruta, providers=["CPUExecutionProvider"])
+
+
+def lonlat_a_pixel(lon: float, lat: float, zoom: int) -> tuple[float, float]:
+    n = TILE * 2**zoom
+    x = (lon + 180) / 360 * n
+    y = (1 - math.asinh(math.tan(math.radians(lat))) / math.pi) / 2 * n
+    return x, y
+
+
+def pixel_a_lonlat(x: float, y: float, zoom: int) -> tuple[float, float]:
+    n = TILE * 2**zoom
+    lon = x / n * 360 - 180
+    lat = math.degrees(math.atan(math.sinh(math.pi * (1 - 2 * y / n))))
+    return lon, lat
+
+
+def formato_es(valor: float, decimales: int) -> str:
+    return f"{valor:,.{decimales}f}".replace(",", "_").replace(".", ",").replace("_", ".")
+
+
+def area_m2(polygon: Polygon) -> float:
+    kx = 111_320 * math.cos(math.radians(polygon.centroid.y))
+    return Polygon([(lon * kx, lat * 110_540) for lon, lat in polygon.exterior.coords]).area
+
+
+def descargar_mosaico(tx0: int, ty0: int, cols: int, rows: int, zoom: int) -> Image.Image:
+    def descargar(tile):
+        tx, ty = tile
+        respuesta = requests.get(ESRI_TILE_URL.format(z=zoom, x=tx, y=ty), timeout=15)
+        respuesta.raise_for_status()
+        return tile, Image.open(BytesIO(respuesta.content)).convert("RGB")
+
+    tiles = [(tx0 + c, ty0 + r) for r in range(rows) for c in range(cols)]
+    mosaico = Image.new("RGB", (cols * TILE, rows * TILE))
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        for (tx, ty), imagen in pool.map(descargar, tiles):
+            mosaico.paste(imagen, ((tx - tx0) * TILE, (ty - ty0) * TILE))
+    return mosaico
+
+
+def detect_units(coords):
+    """Detecta con el modelo de Hugging Face las huellas de edificios dentro
+    del poligono (imagen satelital de Esri) y devuelve una unidad por cada
+    edificio. El tipo se estima por el tamano del techo; pisos y apartamentos
+    los completa el usuario."""
+    polygon = Polygon(coords)
+    area_km2 = area_m2(polygon) / 1e6
+    if area_km2 > AREA_MAXIMA_KM2:
+        raise AnalisisError(
+            f"La zona es demasiado grande ({formato_es(area_km2, 2)} km²). Acérquese en el mapa y "
+            f"dibuje un área de hasta {formato_es(AREA_MAXIMA_KM2, 1)} km²."
+        )
+
+    zoom = ZOOM_ANALISIS
+    vertices_px = [lonlat_a_pixel(lon, lat, zoom) for lon, lat in coords]
+    xs = [x for x, _ in vertices_px]
+    ys = [y for _, y in vertices_px]
+    tx0, ty0 = int(min(xs) // TILE), int(min(ys) // TILE)
+    cols, rows = int(max(xs) // TILE) - tx0 + 1, int(max(ys) // TILE) - ty0 + 1
+
+    try:
+        mosaico = descargar_mosaico(tx0, ty0, cols, rows, zoom)
+    except requests.RequestException as error:
+        raise AnalisisError(
+            "No se pudo descargar la imagen satelital de la zona. Revise la conexión y pruebe de nuevo."
+        ) from error
+
+    pixeles = np.asarray(mosaico, dtype=np.float32) / 255.0
+    parches = pixeles.reshape(rows, TILE, cols, TILE, 3).transpose(0, 2, 1, 3, 4).reshape(-1, TILE, TILE, 3)
+    try:
+        salida = cargar_modelo().run(None, {"input_1": parches})[0]
+    except Exception as error:
+        raise AnalisisError(
+            "El modelo de IA no pudo analizar la imagen en este momento. Pruebe de nuevo en un minuto."
+        ) from error
+    probabilidad = salida.reshape(rows, cols, TILE, TILE).transpose(0, 2, 1, 3).reshape(rows * TILE, cols * TILE)
+
+    origen_x, origen_y = tx0 * TILE, ty0 * TILE
+    mascara_poligono = Image.new("L", mosaico.size, 0)
+    ImageDraw.Draw(mascara_poligono).polygon(
+        [(x - origen_x, y - origen_y) for x, y in vertices_px], fill=1
+    )
+    edificios = ndimage.binary_opening(probabilidad >= UMBRAL_CONFIANZA) & np.asarray(mascara_poligono, dtype=bool)
+    etiquetas, total = ndimage.label(edificios)
+    if total == 0:
+        return []
+
+    metros_por_pixel = 156_543.03392 * math.cos(math.radians(polygon.centroid.y)) / 2**zoom
+    indices = range(1, total + 1)
+    areas = ndimage.sum(edificios, etiquetas, indices) * metros_por_pixel**2
+    centros = ndimage.center_of_mass(edificios, etiquetas, indices)
+
+    candidatos = []
+    for area, (fila, columna) in zip(areas, centros):
+        if area < AREA_MINIMA_M2:
+            continue
+        lon, lat = pixel_a_lonlat(origen_x + columna + 0.5, origen_y + fila + 0.5, zoom)
         if polygon.contains(Point(lon, lat)):
-            tipo = random.choice(["Casa", "Edificio"])
-            index = len(units) + 1
-            units.append(
-                {
-                    "id": index,
-                    "nombre": f"Inmueble {index}",
-                    "lat": round(lat, 6),
-                    "lon": round(lon, 6),
-                    "tipo": tipo,
-                    "pisos": random.randint(2, 15) if tipo == "Edificio" else None,
-                    "apartamentos": random.randint(2, 40) if tipo == "Edificio" else None,
-                }
-            )
-    return units
+            candidatos.append((lat, lon, area))
+    # De norte a sur y de oeste a este, para una numeracion facil de seguir en el mapa.
+    candidatos.sort(key=lambda c: (-round(c[0], 4), c[1]))
+
+    return [
+        {
+            "id": i,
+            "nombre": f"Inmueble {i}",
+            "lat": round(lat, 6),
+            "lon": round(lon, 6),
+            "tipo": "Edificio" if area >= AREA_EDIFICIO_M2 else "Casa",
+            "pisos": None,
+            "apartamentos": None,
+            "area_m2": round(area),
+        }
+        for i, (lat, lon, area) in enumerate(candidatos, start=1)
+    ]
 
 
 inject_theme()
@@ -281,7 +396,7 @@ inject_theme()
 st.markdown(
     """
     <div class="uh-header">
-        <div class="uh-kicker">Detecci&oacute;n asistida por IA &middot; v0 simulada</div>
+        <div class="uh-kicker">Detecci&oacute;n de edificios con IA &middot; Hugging Face</div>
         <div class="uh-title">Extractor UH</div>
         <p class="uh-subtitle">Dibuje un pol&iacute;gono sobre el mapa y obtenga las unidades
         habitacionales identificadas dentro del &aacute;rea.</p>
@@ -296,6 +411,8 @@ if "polygon_coords" not in st.session_state:
     st.session_state.polygon_coords = None
 if "detection_run_id" not in st.session_state:
     st.session_state.detection_run_id = 0
+if "analizado" not in st.session_state:
+    st.session_state.analizado = False
 
 with st.sidebar:
     st.markdown("### Configuración del mapa")
@@ -307,8 +424,9 @@ with st.sidebar:
 with st.container(border=True):
     st.markdown('<div class="uh-section-title">1. Dibuje el área de interés</div>', unsafe_allow_html=True)
     st.caption(
-        "Use la herramienta de polígono (pentágono, a la izquierda del mapa) para trazar un área cerrada. "
-        "Puede alternar entre mapa oscuro y satelital en el control de capas."
+        "Acérquese a la zona y use la herramienta de polígono (pentágono, a la izquierda del mapa) para "
+        f"trazar un área cerrada de hasta {formato_es(AREA_MAXIMA_KM2, 1)} km². La IA analizará la imagen satelital "
+        "de esa área. Puede alternar entre mapa oscuro y satelital en el control de capas."
     )
 
     folium_map = folium.Map(location=[center_lat, center_lon], zoom_start=zoom, control_scale=True, tiles=None)
@@ -364,14 +482,24 @@ with st.container(border=True):
         # El anillo GeoJSON repite el primer vertice al final para cerrarlo.
         n_vertices = len(polygon_coords) - 1 if polygon_coords else 0
 
+        error_analisis = None
+        if run_detection and polygon_coords:
+            try:
+                with st.spinner("Analizando la imagen satelital con IA..."):
+                    st.session_state.units = detect_units(polygon_coords)
+                st.session_state.detection_run_id += 1
+                st.session_state.analizado = True
+            except AnalisisError as error:
+                error_analisis = str(error)
+
         if run_detection and not polygon_coords:
             status("warning", "Primero dibuje un polígono cerrado sobre el mapa.")
+        elif error_analisis:
+            status("warning", error_analisis)
         else:
-            if run_detection:
-                st.session_state.units = simulate_ai_detection(polygon_coords)
-                st.session_state.detection_run_id += 1
-
-            if st.session_state.units:
+            if st.session_state.analizado and not st.session_state.units:
+                status("warning", "No se encontraron unidades habitacionales en el área.")
+            elif st.session_state.units:
                 status(
                     "success",
                     f"Polígono de {n_vertices} vértices · {len(st.session_state.units)} unidades detectadas.",
@@ -383,8 +511,15 @@ with st.container(border=True):
 
 with st.expander("2. Unidades habitacionales detectadas", expanded=True):
     if not st.session_state.units:
-        st.caption("Aún no se ha ejecutado el análisis.")
+        if st.session_state.analizado:
+            st.caption("El último análisis no encontró unidades habitacionales.")
+        else:
+            st.caption("Aún no se ha ejecutado el análisis.")
     else:
+        st.caption(
+            "El tipo se estima según el tamaño del techo detectado. Revise cada fila y complete "
+            "pisos y apartamentos en los edificios."
+        )
         run_id = st.session_state.detection_run_id
         column_widths = [0.5, 2, 2.3, 1.3, 1, 1]
 
@@ -408,7 +543,7 @@ with st.expander("2. Unidades habitacionales detectadas", expanded=True):
             )
 
             row_cols[2].markdown(
-                f"<div class='uh-grid-cell'>{unit['lat']}, {unit['lon']}</div>", unsafe_allow_html=True
+                f"<div class='uh-grid-cell'>{unit['lat']:.6f}, {unit['lon']:.6f}</div>", unsafe_allow_html=True
             )
 
             unit["tipo"] = row_cols[3].selectbox(

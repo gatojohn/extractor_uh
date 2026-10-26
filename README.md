@@ -1,13 +1,9 @@
 # Extractor UH
 
 Aplicación web construida con [Streamlit](https://streamlit.io/) que permite
-dibujar un polígono cerrado sobre un mapa interactivo y simular la
-identificación, mediante un modelo de IA, de las unidades habitacionales
-(casas y edificios) existentes dentro del área seleccionada.
-
-Esta es la **versión 0** del producto: el análisis de IA está **simulado**
-(genera inmuebles de ejemplo distribuidos dentro del polígono) a fin de
-validar el flujo de usuario antes de integrar un modelo real.
+dibujar un polígono cerrado sobre un mapa interactivo e identificar, con un
+modelo de IA de Hugging Face, las unidades habitacionales (casas y edificios)
+que hay dentro del área seleccionada.
 
 ## Funcionalidad
 
@@ -18,19 +14,45 @@ validar el flujo de usuario antes de integrar un modelo real.
 2. **Dibujo de polígono**: con la herramienta de polígono del mapa
    ([`folium.plugins.Draw`](https://python-visualization.github.io/folium/latest/user_guide/plugins/draw.html))
    el usuario traza con el mouse un área cerrada. Se puede editar o borrar.
-3. **Botón "Obtener unidades habitacionales"**: simula que un modelo de IA
-   analiza el área delimitada e identifica los inmuebles presentes. Un
-   indicador de estado junto al botón informa vértices capturados y unidades
-   detectadas.
+3. **Botón "Obtener unidades habitacionales"**: el modelo de IA analiza la
+   imagen satelital del área delimitada (hasta 0,5 km²) y detecta los techos de
+   los edificios. Un indicador de estado junto al botón informa los vértices
+   capturados y las unidades detectadas. También avisa si no se dibujó el
+   polígono, si la zona es demasiado grande, si no se encontraron viviendas o
+   si falló la descarga de imágenes.
 4. **Grilla de resultados** (sección colapsable) con:
    - Número de fila (ascendente).
    - Nombre del inmueble (editable, por defecto "Inmueble 1", "Inmueble 2", ...).
    - Coordenadas geográficas del inmueble.
-   - Lista desplegable **Tipo**: `Casa` o `Edificio`.
+   - Lista desplegable **Tipo**: `Casa` o `Edificio`, propuesto según el tamaño
+     del techo (300 m² o más → `Edificio`) y editable.
    - Si el tipo es `Edificio`, se habilitan los campos **Pisos** y **Apartamentos**.
 
-La barra lateral permite ajustar el centro del mapa, el zoom inicial y la
-altura del mapa (800 px por defecto).
+La barra lateral permite ajustar el centro del mapa (Venezuela por defecto), el
+zoom inicial y la altura del mapa (800 px por defecto).
+
+## La pieza de IA
+
+- **Modelo:** [`geobase/building-footprint-segmentation`](https://huggingface.co/geobase/building-footprint-segmentation),
+  una red U-Net que segmenta techos de edificios en imágenes satelitales.
+- **Cómo se ejecuta:** el modelo solo se publica en formato ONNX para la
+  librería JavaScript [GeoAI.js](https://github.com/decision-labs/geoai.js), por
+  lo que `transformers.pipeline` no puede cargarlo. La app lo descarga con
+  `huggingface_hub` (versión cuantizada, 15 MB, una sola vez) y lo ejecuta con
+  `onnxruntime`, replicando el procesamiento de GeoAI.js:
+  1. Descarga las imágenes de Esri World Imagery del área con zoom 18 (≈ 0,6 m por píxel).
+  2. El modelo estima, píxel a píxel, la probabilidad de que sea techo.
+  3. Los píxeles con probabilidad ≥ 0,3 dentro del polígono se agrupan en
+     techos; se descartan los de menos de 25 m².
+  4. Cada techo se convierte en una fila de la grilla con su coordenada central.
+- **Qué pasa si falla:** si no se pueden descargar las imágenes o el modelo
+  falla, la app muestra un mensaje claro y conserva el polígono.
+- **Limitaciones:** detecta bien los techos claros, pero se le escapan techos
+  oscuros o de teja. Puede dividir un edificio en varios trozos y no distingue
+  viviendas de comercios. El resultado es una estimación para revisar en la
+  grilla.
+- **Referencia:** un polígono de ≈ 0,15 km² en Chacao (Caracas) devuelve unas
+  86 unidades en unos 5 segundos.
 
 ## Diseño visual
 
@@ -77,15 +99,19 @@ Demo: https://extractoruh.streamlit.app/
 
 ```
 .
-├── app.py             # Aplicación Streamlit (lógica + UI)
+├── app.py             # Aplicación Streamlit (lógica + UI + detección con IA)
 ├── requirements.txt   # Dependencias de Python
-└── README.md          # Este documento
+├── README.md          # Este documento
+├── especificacion.md  # Especificación del producto (reto)
+├── AGENTS.md          # Instrucciones para agentes de programación
+└── hito.txt           # Ficha del hito de la semana 2
 ```
 
 ## Roadmap (próximas versiones)
 
-- Reemplazar `simulate_ai_detection()` por la inferencia de un modelo real de
-  detección de inmuebles sobre imágenes satelitales/aéreas.
+- Dibujar sobre el mapa los techos detectados para validar el resultado a simple vista.
+- Clasificar casa / edificio y estimar pisos con un modelo, en lugar de por el
+  tamaño del techo.
 - Persistir los polígonos y resultados (base de datos / almacenamiento).
 - Exportar la grilla de unidades habitacionales (CSV / GeoJSON).
 - Soportar múltiples polígonos por sesión.
@@ -93,4 +119,5 @@ Demo: https://extractoruh.streamlit.app/
 ## Créditos de mapas
 
 © colaboradores de [OpenStreetMap](https://www.openstreetmap.org/copyright) ·
-Imágenes satelitales © Esri.
+Imágenes satelitales © Esri · Modelo de segmentación de
+[Geobase / GeoAI](https://huggingface.co/geobase/building-footprint-segmentation).

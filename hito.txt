@@ -1,0 +1,7 @@
+# Ficha del hito de la semana 2
+
+1. **Problema:** Saber cuántas viviendas hay en una zona exige contar casas y edificios a mano, en la calle o en Google Maps, lo que lleva horas y produce errores.
+2. **Usuario:** Equipos de planificación de empresas de servicios o de ayuntamientos que deben estimar las viviendas de una zona antes de invertir o desplegar un servicio.
+3. **Qué hará la app:** (1) dibujar sobre un mapa el polígono de la zona; (2) detectar con IA los inmuebles residenciales dentro del polígono, con sus coordenadas; (3) revisarlos en una grilla editable indicando si son casa o edificio y, en los edificios, cuántos pisos y apartamentos tienen.
+4. **Pieza de IA:** modelo de Hugging Face (geobase/building-footprint-segmentation) porque está entrenado para detectar techos de edificios en imágenes satelitales y corre gratis en el servidor de la app, sin clave ni cuota.
+5. **Enlace a la versión 0:** https://extractoruh.streamlit.app/
