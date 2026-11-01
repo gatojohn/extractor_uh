@@ -6,9 +6,11 @@
 
 ## Qué es este proyecto
 
-App que permite a los equipos de planificación dibujar una zona sobre un mapa y obtener,
-con ayuda de IA, la lista de casas y edificios de viviendas que hay dentro, para estimar
-cuántas viviendas tiene la zona.
+App que permite a la Gerencia de Planimetría dibujar una zona sobre un mapa y obtener, con
+ayuda de IA, las casas y los edificios que hay dentro, con sus coordenadas y, si es posible,
+su nombre. Busca reducir el levantamiento manual en la calle de las unidades habitacionales
+que forman parte de las solicitudes de permiso ante el ente regulador en Venezuela, para
+tender fibra óptica.
 
 ## Cómo está hecho
 
@@ -46,7 +48,8 @@ cuántas viviendas tiene la zona.
   Los parámetros del análisis (umbral, áreas mínima y máxima, área para proponer "Edificio",
   compacidad) son constantes al principio de `app.py`.
 - Archivos: `app.py` (toda la app), `requirements.txt` (dependencias) y `README.md`. Además,
-  la documentación del reto: `especificacion.md`, `AGENTS.md` y `hito.txt`.
+  la documentación del reto: `especificacion.md`, `AGENTS.md`, `CLAUDE.md`, `hito.txt` y
+  `capturas/`. El entorno de desarrollo está en `.devcontainer/`.
 - La especificación completa está en [`especificacion.md`](especificacion.md).
 
 ## Reglas

@@ -827,7 +827,7 @@ with st.expander("2. Unidades habitacionales detectadas", expanded=True):
                 "apartamentos en los edificios y elimine las que sobren."
             )
         run_id = st.session_state.detection_run_id
-        column_widths = [0.4, 2, 2.1, 1.2, 0.9, 1.3, 1]
+        column_widths = [0.4, 1.7, 1.8, 1.6, 0.7, 1.3, 1.1]
 
         header_cols = st.columns(column_widths)
         for col, label in zip(

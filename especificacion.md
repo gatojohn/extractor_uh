@@ -5,18 +5,17 @@
 
 ## 1. Problema y usuario
 
-- **Quién tiene el problema:** equipos de planificación (de una empresa de servicios como
-  telecomunicaciones o energía, o de un ayuntamiento) que necesitan saber cuántas viviendas
-  hay en una zona antes de decidir una inversión o un despliegue.
-- **Cómo lo resuelve hoy:** recorre la zona a pie, o cuenta casas y edificios uno a uno
-  mirando Google Maps o Street View, y apunta los datos en un Excel. A veces consulta el
-  catastro, que no siempre está actualizado ni es fácil de usar.
-- **Qué le molesta de cómo lo hace hoy:** tarda horas por cada zona, se equivoca al contar
-  (repite o se salta inmuebles) y no tiene la ubicación exacta de cada uno.
+- **Quién tiene el problema:** la Gerencia de Planimetría, que prepara las solicitudes de
+  permiso ante el ente regulador en Venezuela, el organismo que arrienda las canalizaciones
+  subterráneas o aéreas por donde pasará la fibra óptica.
+- **Cómo lo resuelve hoy:** se desplaza a la calle y levanta manualmente las unidades
+  habitacionales que forman parte de cada solicitud.
+- **Qué le molesta de cómo lo hace hoy:** tiene que ir a cada zona y registrar cada unidad a
+  mano, lo que lleva tiempo y se presta a errores.
 - **Qué parte resuelve la IA:** mira la imagen satelital del área elegida y localiza el techo
   de cada edificio. Después, la app cruza esos techos con OpenStreetMap para obtener su
-  nombre y proponer si es una casa o un edificio. **Queda fuera:** saber cuántos pisos y
-  apartamentos tiene cada edificio (lo
+  nombre y proponer si es una casa o un edificio. **Queda fuera:** añadir manualmente las
+  unidades que la IA no detecte, saber cuántos pisos y apartamentos tiene cada edificio (lo
   completa la persona), distinguir viviendas de comercios o naves, y cualquier dato de quién
   vive en cada vivienda.
 
@@ -129,8 +128,8 @@
 - Los mapas deben mostrar la atribución de OpenStreetMap y de Esri, y la grilla la de
   OpenStreetMap cuando muestra sus nombres.
 - El repositorio contiene solo los archivos de la app (`app.py`, `requirements.txt`,
-  `README.md`) y los de documentación del reto (`especificacion.md`, `AGENTS.md`,
-  `hito.txt`).
+  `README.md`), los de documentación del reto (`especificacion.md`, `AGENTS.md`, `CLAUDE.md`,
+  `hito.txt` y la carpeta `capturas/`) y el entorno de desarrollo (`.devcontainer/`).
 
 ## 7. Criterios de aceptación
 
@@ -158,6 +157,7 @@ La app está bien si:
 
 ## 8. Fuera de alcance (por ahora)
 
+- Añadir manualmente unidades habitacionales que la IA no haya detectado.
 - Clasificar casa / edificio y estimar pisos con un modelo, para no depender de los nombres
   de OpenStreetMap.
 - Unir los trozos de un edificio sin nombre, y dibujar el techo completo de los que lo tienen.
