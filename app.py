@@ -6,6 +6,7 @@ dentro del area seleccionada.
 """
 
 import html
+import logging
 import math
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
@@ -31,6 +32,13 @@ st.set_page_config(page_title="Extractor UH", page_icon="\U0001F3E0", layout="wi
 # GeoAI.js (parches RGB 256x256 en [0, 1], umbral 0.3, componentes conexas).
 MODELO = "geobase/building-footprint-segmentation"
 MODELO_ARCHIVO = "onnx/model_quantized.onnx"
+# Segunda opinion con transformers.pipeline: SegFormer b0 entrenado con imagenes
+# satelitales. Apenas ve casas, pero completa techos grandes que el modelo ONNX
+# deja a medias.
+MODELO_PIPELINE = "sawthiha/segformer-b0-finetuned-deprem-satellite"
+ETIQUETA_PIPELINE = "building"
+ZOOM_PIPELINE = 19  # ~0,3 m/pixel: en pruebas cubre el triple de techos que con zoom 18
+COMPACIDAD_PIPELINE = 0.9  # en pruebas, las regiones menos compactas juntan casas vecinas y sus patios
 ESRI_TILE_URL = "https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}"
 TILE = 256
 ZOOM_ANALISIS = 18  # ~0,6 m/pixel: en pruebas segmenta mejor que 17 o 19
@@ -317,7 +325,18 @@ class AnalisisError(Exception):
 @st.cache_resource(show_spinner=False)
 def cargar_modelo() -> ort.InferenceSession:
     ruta = hf_hub_download(MODELO, MODELO_ARCHIVO)
-    return ort.InferenceSession(ruta, providers=["CPUExecutionProvider"])
+    opciones = ort.SessionOptions()
+    opciones.enable_cpu_mem_arena = False  # reduce el pico de memoria: el plan gratuito tiene poca
+    return ort.InferenceSession(ruta, sess_options=opciones, providers=["CPUExecutionProvider"])
+
+
+@st.cache_resource(show_spinner=False)
+def cargar_segmentador():
+    # Importacion diferida: transformers y torch son pesados y, si fallan, la app
+    # debe seguir funcionando con el modelo ONNX.
+    from transformers import pipeline
+
+    return pipeline("image-segmentation", model=MODELO_PIPELINE, device=-1)
 
 
 def lonlat_a_pixel(lon: float, lat: float, zoom: int) -> tuple[float, float]:
@@ -376,11 +395,49 @@ def contorno_techo(mascara: np.ndarray) -> list[tuple[float, float]]:
     return list(forma.exterior.coords)
 
 
+def segmentar_con_pipeline(tx0: int, ty0: int, cols: int, rows: int, tamano: tuple[int, int]) -> np.ndarray | None:
+    """Mascara de techos de SegFormer, alineada con el mosaico del modelo ONNX
+    (de tamano `tamano`). Devuelve None si falla: es una mejora, no debe impedir
+    el analisis."""
+    escala = 2 ** (ZOOM_PIPELINE - ZOOM_ANALISIS)
+    lado = TILE * escala
+    try:
+        segmentador = cargar_segmentador()
+        mosaico = descargar_mosaico(tx0 * escala, ty0 * escala, cols * escala, rows * escala, ZOOM_PIPELINE)
+        mascara = Image.new("L", mosaico.size, 0)
+        for y in range(0, mosaico.height, lado):
+            for x in range(0, mosaico.width, lado):
+                for segmento in segmentador(mosaico.crop((x, y, x + lado, y + lado))):
+                    if segmento["label"] == ETIQUETA_PIPELINE:
+                        mascara.paste(segmento["mask"], (x, y))
+    except Exception:
+        logging.exception("SegFormer no disponible: se usa solo el modelo ONNX")
+        return None
+    return np.asarray(mascara.resize(tamano, Image.NEAREST), dtype=bool)
+
+
+def completar_techos(techos: np.ndarray, segmentacion: np.ndarray, metros_por_pixel: float) -> np.ndarray:
+    """Anade a los techos del modelo ONNX las regiones de SegFormer grandes,
+    compactas y que tocan un techo ya detectado. Sin este filtro, SegFormer junta
+    casas vecinas y marca como techo la imagen de relleno que Esri sirve sobre el agua."""
+    regiones, _ = ndimage.label(ndimage.binary_opening(segmentacion))
+    completados = techos.copy()
+    for etiqueta, recorte in enumerate(ndimage.find_objects(regiones), start=1):
+        region = regiones[recorte] == etiqueta
+        if region.sum() * metros_por_pixel**2 < AREA_EDIFICIO_M2 or not techos[recorte][region].any():
+            continue
+        forma = Polygon(contorno_techo(region))
+        if forma.area >= COMPACIDAD_PIPELINE * forma.convex_hull.area:
+            completados[recorte] |= region
+    return completados
+
+
 def detect_units(coords):
-    """Detecta con el modelo de Hugging Face las huellas de edificios dentro
+    """Detecta con los modelos de Hugging Face las huellas de edificios dentro
     del poligono (imagen satelital de Esri) y devuelve una unidad por cada
-    edificio. El tipo se estima por el tamano del techo; pisos y apartamentos
-    los completa el usuario."""
+    edificio, junto con un indicador de si SegFormer pudo participar. El tipo
+    se estima por el tamano del techo; pisos y apartamentos los completa el
+    usuario."""
     polygon = Polygon(coords)
     area_km2 = area_m2(polygon) / 1e6
     if area_km2 > AREA_MAXIMA_KM2:
@@ -406,24 +463,32 @@ def detect_units(coords):
     pixeles = np.asarray(mosaico, dtype=np.float32) / 255.0
     parches = pixeles.reshape(rows, TILE, cols, TILE, 3).transpose(0, 2, 1, 3, 4).reshape(-1, TILE, TILE, 3)
     try:
-        salida = cargar_modelo().run(None, {"input_1": parches})[0]
+        sesion = cargar_modelo()
+        # Parche a parche: procesarlos todos juntos dispara la memoria.
+        salida = np.concatenate([sesion.run(None, {"input_1": parche[None]})[0] for parche in parches])
     except Exception as error:
         raise AnalisisError(
             "El modelo de IA no pudo analizar la imagen en este momento. Pruebe de nuevo en un minuto."
         ) from error
     probabilidad = salida.reshape(rows, cols, TILE, TILE).transpose(0, 2, 1, 3).reshape(rows * TILE, cols * TILE)
 
+    metros_por_pixel = 156_543.03392 * math.cos(math.radians(polygon.centroid.y)) / 2**zoom
+    techos = probabilidad >= UMBRAL_CONFIANZA
+    segmentacion = segmentar_con_pipeline(tx0, ty0, cols, rows, mosaico.size)
+    pipeline_ok = segmentacion is not None
+    if pipeline_ok:
+        techos = completar_techos(techos, segmentacion, metros_por_pixel)
+
     origen_x, origen_y = tx0 * TILE, ty0 * TILE
     mascara_poligono = Image.new("L", mosaico.size, 0)
     ImageDraw.Draw(mascara_poligono).polygon(
         [(x - origen_x, y - origen_y) for x, y in vertices_px], fill=1
     )
-    edificios = ndimage.binary_opening(probabilidad >= UMBRAL_CONFIANZA) & np.asarray(mascara_poligono, dtype=bool)
+    edificios = ndimage.binary_opening(techos) & np.asarray(mascara_poligono, dtype=bool)
     etiquetas, total = ndimage.label(edificios)
     if total == 0:
-        return []
+        return [], pipeline_ok
 
-    metros_por_pixel = 156_543.03392 * math.cos(math.radians(polygon.centroid.y)) / 2**zoom
     indices = range(1, total + 1)
     areas = ndimage.sum(edificios, etiquetas, indices) * metros_por_pixel**2
     centros = ndimage.center_of_mass(edificios, etiquetas, indices)
@@ -445,7 +510,7 @@ def detect_units(coords):
     # De norte a sur y de oeste a este, para una numeracion facil de seguir en el mapa.
     candidatos.sort(key=lambda c: (-round(c[0], 4), c[1]))
 
-    return [
+    unidades = [
         {
             "id": i,
             "nombre": f"Inmueble {i}",
@@ -459,6 +524,7 @@ def detect_units(coords):
         }
         for i, (lat, lon, area, huella) in enumerate(candidatos, start=1)
     ]
+    return unidades, pipeline_ok
 
 
 inject_theme()
@@ -485,6 +551,8 @@ if "analizado" not in st.session_state:
     st.session_state.analizado = False
 if "error_analisis" not in st.session_state:
     st.session_state.error_analisis = None
+if "pipeline_ok" not in st.session_state:
+    st.session_state.pipeline_ok = True
 
 with st.sidebar:
     st.markdown("### Configuración del mapa")
@@ -582,7 +650,7 @@ with st.container(border=True):
         if run_detection and polygon_coords:
             try:
                 with st.spinner("Analizando la imagen satelital con IA..."):
-                    st.session_state.units = detect_units(polygon_coords)
+                    st.session_state.units, st.session_state.pipeline_ok = detect_units(polygon_coords)
                 st.session_state.detection_run_id += 1
                 st.session_state.analizado = True
                 st.session_state.error_analisis = None
@@ -598,6 +666,12 @@ with st.container(border=True):
         else:
             if st.session_state.analizado and not st.session_state.units:
                 status("warning", "No se encontraron unidades habitacionales en el área.")
+            elif st.session_state.units and not st.session_state.pipeline_ok:
+                status(
+                    "warning",
+                    f"{len(st.session_state.units)} unidades detectadas solo con el modelo principal: "
+                    "el segundo modelo no estuvo disponible.",
+                )
             elif st.session_state.units:
                 status(
                     "success",

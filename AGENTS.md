@@ -16,15 +16,23 @@ cuántas viviendas tiene la zona.
 - Interfaz: Streamlit (ruta A), desplegada en https://extractoruh.streamlit.app/.
 - Mapa: `folium` + `streamlit-folium` (`st_folium`), con el plugin `Draw` para el polígono.
   Geometría con `shapely`.
-- IA: modelo de Hugging Face `geobase/building-footprint-segmentation` (constante `MODELO`
-  de `app.py`), U-Net que segmenta techos de edificios. **Solo existe en ONNX** (para
-  GeoAI.js), así que `transformers.pipeline` no puede cargarlo: se descarga con
-  `huggingface_hub` y se ejecuta con `onnxruntime` en `detect_units()`, que devuelve una
-  lista de diccionarios con `id`, `nombre`, `lat`, `lon`, `tipo`, `pisos`, `apartamentos` y
-  `area_m2`.
-- Imágenes: tiles de Esri World Imagery con zoom 18 (`ZOOM_ANALISIS`). Los parámetros del
-  análisis (umbral, áreas mínima y máxima, área para proponer "Edificio") son constantes al
-  principio de `app.py`.
+- IA principal: modelo de Hugging Face `geobase/building-footprint-segmentation` (constante
+  `MODELO` de `app.py`), U-Net que segmenta techos de edificios. **Solo existe en ONNX**
+  (para GeoAI.js), así que `transformers.pipeline` no puede cargarlo: se descarga con
+  `huggingface_hub` y se ejecuta con `onnxruntime` en `detect_units()`, que devuelve la
+  lista de unidades (`id`, `nombre`, `lat`, `lon`, `tipo`, `pisos`, `apartamentos`,
+  `area_m2`, `huella`) y si SegFormer pudo participar.
+- IA con pipeline: `sawthiha/segformer-b0-finetuned-deprem-satellite` (constante
+  `MODELO_PIPELINE`), con `pipeline("image-segmentation")` en `segmentar_con_pipeline()`.
+  `completar_techos()` solo acepta sus regiones grandes, compactas y que tocan un techo ya
+  detectado. Si relajas ese filtro, repite los casos 1 y 4: en pruebas juntaba casas vecinas
+  y detectaba techos en la imagen de relleno que Esri sirve sobre el agua.
+- `torch` se instala en versión CPU con `--find-links` en `requirements.txt`. No lo cambies
+  a `--extra-index-url` (`uv` no resuelve las dependencias) ni quites la línea (se instala
+  la variante con CUDA).
+- Imágenes: tiles de Esri World Imagery con zoom 18 (`ZOOM_ANALISIS`) y 19 (`ZOOM_PIPELINE`).
+  Los parámetros del análisis (umbral, áreas mínima y máxima, área para proponer "Edificio",
+  compacidad) son constantes al principio de `app.py`.
 - Archivos: `app.py` (toda la app), `requirements.txt` (dependencias) y `README.md`. Además,
   la documentación del reto: `especificacion.md`, `AGENTS.md` y `hito.txt`.
 - La especificación completa está en [`especificacion.md`](especificacion.md).
@@ -35,8 +43,9 @@ cuántas viviendas tiene la zona.
   Nunca en el código, en el README ni en el chat.
 - Cada descarga de imágenes y cada ejecución del modelo van dentro de `try/except`. Los
   fallos se convierten en `AnalisisError` con un mensaje claro para el usuario.
-- El modelo se carga con `@st.cache_resource` (una vez por servidor): el plan gratuito de
-  Streamlit Cloud tiene poca memoria.
+- Los modelos se cargan con `@st.cache_resource` (una vez por servidor): el plan gratuito
+  de Streamlit Cloud tiene poca memoria. Si SegFormer falla, la app sigue con el modelo
+  principal y lo avisa.
 - Textos de la interfaz en español, sencillos, pensados para alguien sin conocimientos
   técnicos.
 - Cambios pequeños: uno por petición. Al terminar, explica qué has cambiado y por qué.
@@ -88,8 +97,10 @@ cuántas viviendas tiene la zona.
      sin descargar imágenes.
   6. Sin conexión para descargar la imagen → mensaje claro para revisar la conexión, sin
      romper la app.
+  7. SegFormer no disponible → la grilla se llena con el modelo principal y un aviso lo
+     indica.
 - Referencia: un polígono de ≈ 0,15 km² sobre Chacao (Caracas, 10.4965, -66.8533) da unas
-  86 unidades en unos 5 segundos.
+  84 unidades en unos 8 segundos.
 
 ## Qué no hacer
 

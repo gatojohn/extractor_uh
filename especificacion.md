@@ -35,34 +35,44 @@
 
 | El usuario da… | La app devuelve… | Ejemplo |
 |---|---|---|
-| Un polígono dibujado sobre el mapa | Una lista de inmuebles dentro del polígono, cada uno con nombre, coordenadas y tipo estimado | Polígono de 4 vértices (≈ 0,15 km²) sobre Chacao, Caracas → 86 inmuebles en unos 5 segundos |
+| Un polígono dibujado sobre el mapa | Una lista de inmuebles dentro del polígono, cada uno con nombre, coordenadas y tipo estimado | Polígono de 4 vértices (≈ 0,15 km²) sobre Chacao, Caracas → 84 inmuebles en unos 8 segundos |
 | Un cambio en la columna **Tipo** de una fila | Si elige *Edificio*, aparecen los campos **Pisos** y **Apartamentos**; si elige *Casa*, desaparecen | "Inmueble 4": Casa → Edificio, 6 pisos, 24 apartamentos |
 | Un cambio en el nombre de un inmueble | La grilla guarda el nombre nuevo | "Inmueble 2" → "Edificio Los Álamos" |
 
 ## 4. La pieza de IA
 
-- **Opción elegida:** modelo de Hugging Face
+- **Opción elegida:** dos modelos de Hugging Face. El principal es
   [`geobase/building-footprint-segmentation`](https://huggingface.co/geobase/building-footprint-segmentation),
-  una red U-Net que segmenta huellas (techos) de edificios en imágenes satelitales.
-- **Por qué:** está entrenado justo para esta tarea, corre gratis en el propio servidor de
-  la app (sin clave de API ni cuota) y analiza una manzana en pocos segundos.
-- **Cómo se usa:** el modelo solo se publica en formato ONNX para la librería JavaScript
-  GeoAI.js, así que la librería `transformers` de Python (`pipeline()`) no puede cargarlo.
-  La app lo descarga con `huggingface_hub` y lo ejecuta con `onnxruntime`, replicando el
-  procesamiento de GeoAI.js:
+  una red U-Net que segmenta huellas (techos) de edificios en imágenes satelitales. El
+  segundo es
+  [`sawthiha/segformer-b0-finetuned-deprem-satellite`](https://huggingface.co/sawthiha/segformer-b0-finetuned-deprem-satellite),
+  un SegFormer que se ejecuta con `pipeline("image-segmentation")` de `transformers`.
+- **Por qué:** están entrenados justo para esta tarea, corren gratis en el propio servidor
+  de la app (sin clave de API ni cuota) y analizan una manzana en pocos segundos. El
+  principal da la lista de inmuebles y SegFormer completa algunos techos grandes.
+- **Instrucciones para el modelo (system prompt):** no aplica. Son modelos de segmentación
+  de imágenes, no modelos de lenguaje.
+- **Cómo se usa:** el modelo principal solo se publica en formato ONNX para la librería
+  JavaScript GeoAI.js, así que `pipeline()` no puede cargarlo. La app lo descarga con
+  `huggingface_hub` y lo ejecuta con `onnxruntime`, replicando el procesamiento de GeoAI.js:
   1. Descarga las imágenes de Esri World Imagery que cubren el polígono, con zoom 18
      (unos 0,6 m por píxel; en pruebas da mejores resultados que 17 o 19).
   2. Pasa al modelo parches RGB de 256 × 256 píxeles con valores entre 0 y 1. El modelo
      devuelve, para cada píxel, la probabilidad de que sea techo de edificio.
-  3. Marca como edificio los píxeles con probabilidad de 0,3 o más que caen dentro del
-     polígono, y cuenta cada techo separado como un inmueble. Descarta los techos de menos
-     de 25 m².
-  4. Calcula el centro de cada techo en latitud y longitud. Propone "Edificio" si el techo
+  3. Marca como edificio los píxeles con probabilidad de 0,3 o más.
+  4. Pasa a SegFormer las imágenes de la misma zona con zoom 19 (unos 0,3 m por píxel) y
+     añade solo las regiones de 300 m² o más que sean muy compactas y toquen un techo ya
+     detectado. Sin este filtro, SegFormer junta casas vecinas con sus patios y marca como
+     techo la imagen de relleno que Esri sirve sobre el agua.
+  5. Dentro del polígono, cuenta cada techo separado como un inmueble y descarta los de
+     menos de 25 m².
+  6. Calcula el centro de cada techo en latitud y longitud. Propone "Edificio" si el techo
      mide 300 m² o más, y "Casa" si es más pequeño.
 - **Limitaciones conocidas:** detecta bien los techos claros, pero se le escapan techos
   oscuros o de teja. A veces divide un edificio en varios trozos y no distingue viviendas
-  de comercios o naves. Por eso la grilla es editable y el resultado es una estimación que
-  la persona revisa.
+  de comercios o naves. SegFormer cambia pocas unidades: en las pruebas no alteró zonas de
+  casas y solo mejoró algunos techos grandes. Por eso la grilla es editable y el resultado
+  es una estimación que la persona revisa.
 
 ## 5. Flujo del usuario
 
@@ -83,8 +93,8 @@
   de Esri, con despliegue gratuito en Streamlit Community Cloud (ruta A). No hace falta
   ninguna clave de API. Si en el futuro se añade una, irá en secretos (`st.secrets`) y
   nunca en el código.
-- El servidor gratuito tiene poca memoria: el modelo se carga una sola vez (versión
-  cuantizada, 15 MB) y se reutiliza entre análisis.
+- El servidor gratuito tiene poca memoria: cada modelo se carga una sola vez (15 MB cada
+  uno) y se reutiliza entre análisis. `torch` se instala en su versión CPU.
 - Sin datos personales reales: la app solo maneja coordenadas y características de
   inmuebles, nunca nombres de propietarios ni de residentes.
 - Lenguaje sencillo, para alguien sin conocimientos técnicos.
@@ -108,6 +118,7 @@ La app está bien si:
 | Polígono de más de 0,5 km² | Mensaje que pide acercarse y dibujar una zona más pequeña. No se descargan imágenes ni se llama a la IA |
 | No se puede descargar la imagen satelital (sin conexión) | Mensaje claro: "No se pudo descargar la imagen satelital de la zona. Revise la conexión y pruebe de nuevo." La app no se rompe y conserva el polígono |
 | El modelo falla al analizar | Mensaje: "El modelo de IA no pudo analizar la imagen en este momento. Pruebe de nuevo en un minuto." |
+| SegFormer no está disponible | La grilla se llena con el modelo principal y un aviso indica que se usó solo ese modelo |
 | Contraer y volver a expandir la grilla | El título sigue visible y los datos editados se mantienen |
 
 ## 8. Fuera de alcance (por ahora)

@@ -36,26 +36,44 @@ zoom inicial y la altura del mapa (800 px por defecto).
 
 ## La pieza de IA
 
-- **Modelo:** [`geobase/building-footprint-segmentation`](https://huggingface.co/geobase/building-footprint-segmentation),
-  una red U-Net que segmenta techos de edificios en imágenes satelitales.
-- **Cómo se ejecuta:** el modelo solo se publica en formato ONNX para la
-  librería JavaScript [GeoAI.js](https://github.com/decision-labs/geoai.js), por
-  lo que `transformers.pipeline` no puede cargarlo. La app lo descarga con
+La app combina dos modelos de Hugging Face:
+
+- **Modelo principal:** [`geobase/building-footprint-segmentation`](https://huggingface.co/geobase/building-footprint-segmentation),
+  una red U-Net que segmenta techos de edificios en imágenes satelitales. Decide
+  qué inmuebles hay en la zona. Solo se publica en formato ONNX para la librería
+  JavaScript [GeoAI.js](https://github.com/decision-labs/geoai.js), por lo que
+  `transformers.pipeline` no puede cargarlo. La app lo descarga con
   `huggingface_hub` (versión cuantizada, 15 MB, una sola vez) y lo ejecuta con
-  `onnxruntime`, replicando el procesamiento de GeoAI.js:
-  1. Descarga las imágenes de Esri World Imagery del área con zoom 18 (≈ 0,6 m por píxel).
-  2. El modelo estima, píxel a píxel, la probabilidad de que sea techo.
-  3. Los píxeles con probabilidad ≥ 0,3 dentro del polígono se agrupan en
-     techos; se descartan los de menos de 25 m².
-  4. Cada techo se convierte en una fila de la grilla con su coordenada central.
+  `onnxruntime`, replicando el procesamiento de GeoAI.js.
+- **Segunda opinión:** [`sawthiha/segformer-b0-finetuned-deprem-satellite`](https://huggingface.co/sawthiha/segformer-b0-finetuned-deprem-satellite),
+  un SegFormer de 15 MB que se ejecuta con
+  `pipeline("image-segmentation", model=...)` de `transformers`. Apenas ve casas,
+  pero completa algunos techos grandes que el modelo principal deja a medias.
+
+Cómo se combinan:
+
+1. La app descarga las imágenes de Esri World Imagery del área con zoom 18
+   (≈ 0,6 m por píxel) para el modelo principal y con zoom 19 (≈ 0,3 m por píxel)
+   para SegFormer.
+2. El modelo principal estima, píxel a píxel, la probabilidad de que sea techo
+   (se toma ≥ 0,3).
+3. Una región de SegFormer solo se añade si mide 300 m² o más, es muy compacta
+   y toca un techo ya detectado. Sin este filtro, junta casas vecinas con sus
+   patios y marca como techo la imagen de relleno que Esri sirve sobre el agua.
+4. Los píxeles dentro del polígono se agrupan en techos, se descartan los de
+   menos de 25 m² y cada techo se convierte en una fila de la grilla.
+
 - **Qué pasa si falla:** si no se pueden descargar las imágenes o el modelo
-  falla, la app muestra un mensaje claro y conserva el polígono.
+  principal falla, la app muestra un mensaje claro y conserva el polígono. Si
+  falla SegFormer, la app sigue con el modelo principal y lo indica junto al
+  botón.
 - **Limitaciones:** detecta bien los techos claros, pero se le escapan techos
   oscuros o de teja. Puede dividir un edificio en varios trozos y no distingue
-  viviendas de comercios. El resultado es una estimación para revisar en la
-  grilla.
+  viviendas de comercios. SegFormer cambia pocas unidades: en las pruebas no
+  alteró zonas de casas y solo mejoró algunos techos grandes. El resultado es una
+  estimación para revisar en la grilla.
 - **Referencia:** un polígono de ≈ 0,15 km² en Chacao (Caracas) devuelve unas
-  86 unidades en unos 5 segundos.
+  84 unidades en unos 8 segundos.
 
 ## Diseño visual
 
@@ -121,5 +139,6 @@ Demo: https://extractoruh.streamlit.app/
 ## Créditos de mapas
 
 © colaboradores de [OpenStreetMap](https://www.openstreetmap.org/copyright) ·
-Imágenes satelitales © Esri · Modelo de segmentación de
-[Geobase / GeoAI](https://huggingface.co/geobase/building-footprint-segmentation).
+Imágenes satelitales © Esri · Modelos de segmentación de
+[Geobase / GeoAI](https://huggingface.co/geobase/building-footprint-segmentation) y
+[sawthiha](https://huggingface.co/sawthiha/segformer-b0-finetuned-deprem-satellite).

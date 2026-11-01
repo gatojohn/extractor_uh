@@ -1,3 +1,4 @@
+--find-links https://download.pytorch.org/whl/cpu/torch/
 streamlit>=1.37
 streamlit-folium>=0.21
 folium>=0.17
@@ -8,3 +9,5 @@ numpy>=1.26
 pillow>=10.0
 requests>=2.31
 scipy>=1.11
+torch>=2.2
+transformers>=5.0
