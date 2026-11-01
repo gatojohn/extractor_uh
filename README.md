@@ -82,6 +82,12 @@ edificios con nombre de la zona y los cruza con cada techo:
   otra forma.
 - Un techo sin coincidencia no tiene nombre: es `Edificio` si mide 300 m² o más,
   y `Casa` si es más pequeño.
+- Si varios techos coinciden con el mismo edificio de OpenStreetMap (la IA lo
+  partió en trozos), queda solo una fila: la del trozo que más se solapa. Los
+  demás trozos desaparecen de la grilla y del mapa, y el techo dibujado puede
+  cubrir solo una parte del edificio.
+- Se compara el edificio, no el texto. Dos edificios distintos que se llaman
+  igual, como las "Torre B" de dos conjuntos vecinos, conservan una fila cada uno.
 
 ## Qué pasa si falla algo
 
@@ -97,8 +103,9 @@ edificios con nombre de la zona y los cruza con cada techo:
 ## Limitaciones
 
 - Detecta bien los techos claros, pero se le escapan techos oscuros o de teja.
-- Puede dividir un edificio en varios trozos: varias filas tendrán el mismo
-  nombre de OpenStreetMap y conviene eliminar las que sobren.
+- Puede dividir un edificio en varios trozos. Con nombre de OpenStreetMap quedan
+  en una fila; sin nombre, cada trozo cuenta como una unidad y conviene eliminar
+  los que sobren.
 - No distingue viviendas de comercios: una oficina llamada "Edificio X" cuenta
   como `Edificio`.
 - La clasificación depende de lo completo que esté OpenStreetMap. En La Urbina
@@ -113,7 +120,7 @@ edificios con nombre de la zona y los cruza con cada techo:
 El resultado es una estimación para revisar en la grilla.
 
 **Referencia:** un polígono de ≈ 0,15 km² en Chacao (Caracas) tarda unos
-15 segundos. En La Urbina, uno similar devuelve unas 95 unidades: unas 55 con
+15 segundos. En La Urbina, uno similar devuelve unas 80 unidades: unas 40 con
 nombre de OpenStreetMap, casi todas `Edificio`.
 
 ## Diseño visual

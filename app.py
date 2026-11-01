@@ -490,23 +490,38 @@ def edificios_osm(polygon: Polygon) -> list[tuple] | None:
     return None
 
 
-def clasificar_con_osm(unidades: list[dict], edificios: list[tuple]) -> None:
+def clasificar_con_osm(unidades: list[dict], edificios: list[tuple]) -> list[dict]:
     """Pone a cada unidad el nombre del edificio de OpenStreetMap que mas se solapa
     con su techo. Con nombre, es "Edificio" si empieza por Torre, Residencias o
     Edificio, y "Casa" si no. Sin nombre, conserva el tipo estimado por el tamano
-    del techo."""
+    del techo. Devuelve las unidades sin repetir edificio: la IA puede partir un
+    techo en trozos, y de cada edificio de OSM queda solo el trozo con mas solape.
+    Se compara el edificio y no el texto: hay edificios distintos con el mismo
+    nombre, como las "Torre B" de dos conjuntos vecinos."""
     formas = [forma for forma, _ in edificios]
     arbol = STRtree(formas)
+    coincidencias = []
+    elegidas = {}  # indice del edificio -> (solape, unidad)
     for unidad in unidades:
         huella = Polygon([(lon, lat) for lat, lon in unidad["huella"]]).buffer(0)
-        nombre, mayor_solape = None, 0
+        edificio, mayor_solape = None, 0
         for indice in arbol.query(huella, predicate="intersects"):
             solape = huella.intersection(formas[indice]).area
             if solape > mayor_solape and solape >= COINCIDENCIA_OSM * min(huella.area, formas[indice].area):
-                nombre, mayor_solape = edificios[indice][1], solape
-        if nombre:
-            unidad["nombre"] = nombre
-            unidad["tipo"] = "Edificio" if PREFIJO_EDIFICIO.match(nombre) else "Casa"
+                edificio, mayor_solape = indice, solape
+        coincidencias.append((unidad, edificio))
+        if edificio is not None and mayor_solape > elegidas.get(edificio, (0,))[0]:
+            elegidas[edificio] = (mayor_solape, unidad)
+
+    conservadas = []
+    for unidad, edificio in coincidencias:
+        if edificio is None:
+            conservadas.append(unidad)
+        elif elegidas[edificio][1] is unidad:
+            unidad["nombre"] = edificios[edificio][1]
+            unidad["tipo"] = "Edificio" if PREFIJO_EDIFICIO.match(unidad["nombre"]) else "Casa"
+            conservadas.append(unidad)
+    return conservadas
 
 
 def detect_units(coords):
@@ -514,7 +529,8 @@ def detect_units(coords):
     del poligono (imagen satelital de Esri) y devuelve una unidad por cada
     edificio, junto con dos indicadores: si SegFormer pudo participar y si
     OpenStreetMap respondio. El nombre y el tipo salen de OpenStreetMap; sin nombre,
-    el tipo se estima por el tamano del techo. Pisos y apartamentos los completa el
+    el tipo se estima por el tamano del techo. Los trozos de un mismo edificio de
+    OpenStreetMap quedan en una sola unidad. Pisos y apartamentos los completa el
     usuario."""
     polygon = Polygon(coords)
     area_km2 = area_m2(polygon) / 1e6
@@ -590,8 +606,7 @@ def detect_units(coords):
 
     unidades = [
         {
-            "id": i,
-            "nombre": f"Inmueble {i}",
+            "nombre": None,
             "lat": round(lat, 6),
             "lon": round(lon, 6),
             "tipo": "Edificio" if area >= AREA_EDIFICIO_M2 else "Casa",
@@ -600,12 +615,16 @@ def detect_units(coords):
             "area_m2": round(area),
             "huella": huella,
         }
-        for i, (lat, lon, area, huella) in enumerate(candidatos, start=1)
+        for lat, lon, area, huella in candidatos
     ]
     edificios = edificios_osm(polygon)
     osm_ok = edificios is not None
     if osm_ok:
-        clasificar_con_osm(unidades, edificios)
+        unidades = clasificar_con_osm(unidades, edificios)
+    # Se numera al final: quitar los trozos repetidos no debe dejar huecos.
+    for i, unidad in enumerate(unidades, start=1):
+        unidad["id"] = i
+        unidad["nombre"] = unidad["nombre"] or f"Inmueble {i}"
     return unidades, pipeline_ok, osm_ok
 
 
@@ -798,8 +817,9 @@ with st.expander("2. Unidades habitacionales detectadas", expanded=True):
             st.caption(
                 "Si un techo coincide con un edificio de OpenStreetMap, la fila toma su nombre: es Edificio si "
                 "empieza por Torre, Residencias o Edificio, y Casa si no. Sin nombre, el tipo se estima por el "
-                f"tamaño del techo ({AREA_EDIFICIO_M2} m² o más: Edificio). Revise cada fila, complete pisos y "
-                "apartamentos en los edificios y elimine las que sobren. Nombres © colaboradores de OpenStreetMap."
+                f"tamaño del techo ({AREA_EDIFICIO_M2} m² o más: Edificio). Si la IA parte un edificio en trozos, "
+                "queda una sola fila. Revise cada fila, complete pisos y apartamentos en los edificios y elimine "
+                "las que sobren. Nombres © colaboradores de OpenStreetMap."
             )
         else:
             st.caption(

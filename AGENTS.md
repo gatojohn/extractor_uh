@@ -34,7 +34,11 @@ cuántas viviendas tiene la zona.
   `clasificar_con_osm()` los cruza con los techos (solape mínimo `COINCIDENCIA_OSM`). Con
   nombre, la fila lo toma y es "Edificio" solo si coincide con `PREFIJO_EDIFICIO`; si no, es
   "Casa" aunque el techo sea grande. Sin nombre, conserva el tipo por tamaño del techo
-  (`AREA_EDIFICIO_M2`). Son reglas pedidas por el usuario: no las cambies sin preguntar.
+  (`AREA_EDIFICIO_M2`). Si varios techos coinciden con el mismo edificio de OSM, queda solo
+  el de mayor solape y sus trozos desaparecen de la grilla y del mapa. Compara el edificio,
+  no el texto: en La Urbina hay "Torre B" distintas a menos de 50 m. La numeración se hace
+  al final de `detect_units()` para que no queden huecos. Son reglas pedidas por el usuario:
+  no las cambies sin preguntar.
 - Overpass se satura a menudo: se prueban los `OVERPASS_URLS` por orden con 10 segundos para
   cada uno, y si fallan la app sigue con la regla del tamaño y un aviso. No uses
   `api.openstreetmap.org`: responde rápido, pero su política la reserva para editar.
@@ -123,8 +127,10 @@ cuántas viviendas tiene la zona.
   10. Pulsar "Eliminar" → desaparecen la fila y su techo; se conservan el polígono y los
       datos editados de las demás filas. Al eliminar todas, mensaje propio (no "No se
       encontraron…") y un análisis nuevo trae todas las unidades.
+  11. Edificio partido en trozos por la IA → una sola fila y un solo techo, numeración sin
+      huecos. Dos edificios distintos de OSM con el mismo nombre conservan una fila cada uno.
 - Referencia: un polígono de ≈ 0,15 km² sobre La Urbina (Caracas, 10.4865, -66.8069) da unas
-  95 unidades, unas 55 con nombre de OpenStreetMap, en unos 15 segundos.
+  80 unidades, unas 40 con nombre de OpenStreetMap, en unos 15 segundos.
 
 ## Qué no hacer
 

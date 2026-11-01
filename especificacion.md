@@ -41,12 +41,13 @@
 
 | El usuario da… | La app devuelve… | Ejemplo |
 |---|---|---|
-| Un polígono dibujado sobre el mapa | Una lista de inmuebles dentro del polígono, cada uno con nombre, coordenadas y tipo estimado | Polígono de 4 vértices (≈ 0,15 km²) sobre La Urbina, Caracas → unos 95 inmuebles en unos 15 segundos, unos 55 con nombre de OpenStreetMap |
+| Un polígono dibujado sobre el mapa | Una lista de inmuebles dentro del polígono, cada uno con nombre, coordenadas y tipo estimado | Polígono de 4 vértices (≈ 0,15 km²) sobre La Urbina, Caracas → unos 80 inmuebles en unos 15 segundos, unos 40 con nombre de OpenStreetMap |
 | Un techo que coincide con "Residencias Vaduz" en OpenStreetMap | La fila se llama así y su tipo es Edificio | Un techo que coincide con "Automercado Luz" → Casa |
 | Un techo sin coincidencia en OpenStreetMap | La fila se llama "Inmueble N" y su tipo sale del tamaño del techo | Techo de 391 m² → Edificio; techo de 120 m² → Casa |
+| Varios techos que coinciden con el mismo edificio de OpenStreetMap | Una sola fila y un solo techo en el mapa: el trozo que más se solapa | Tres trozos de "Residencias Don Julio" → una fila |
 | Un cambio en la columna **Tipo** de una fila | Si elige *Edificio*, aparecen los campos **Pisos** y **Apartamentos**; si elige *Casa*, desaparecen | "Inmueble 4": Casa → Edificio, 6 pisos, 24 apartamentos |
 | Un cambio en el nombre de un inmueble | La grilla guarda el nombre nuevo | "Inmueble 2" → "Edificio Los Álamos" |
-| Pulsar **Eliminar** en una fila | La fila y su techo desaparecen; el resto de filas conserva su número y sus datos | Eliminar la fila 7 → la grilla pasa de la 6 a la 8 y el indicador muestra "93 unidades en la grilla · eliminadas: 1" |
+| Pulsar **Eliminar** en una fila | La fila y su techo desaparecen; el resto de filas conserva su número y sus datos | Eliminar la fila 7 → la grilla pasa de la 6 a la 8 y el indicador muestra "78 unidades en la grilla · eliminadas: 1" |
 
 ## 4. La pieza de IA
 
@@ -81,12 +82,17 @@
      gana el de mayor solape. La fila toma ese nombre y es "Edificio" si empieza por Torre,
      Residencias o Edificio (singular o plural, sin distinguir mayúsculas), y "Casa" si
      empieza de otra forma. Un techo sin coincidencia no tiene nombre: es "Edificio" si mide
-     300 m² o más, y "Casa" si es más pequeño. Estas reglas no son IA.
+     300 m² o más, y "Casa" si es más pequeño.
+  8. Si varios techos coinciden con el mismo edificio de OpenStreetMap, conserva solo el que
+     más se solapa y numera las filas al final. Compara el edificio, no el texto: dos
+     edificios distintos que se llaman igual conservan una fila cada uno. Los pasos 7 y 8
+     son reglas, no IA.
 - **Limitaciones conocidas:** detecta bien los techos claros, pero se le escapan techos
   oscuros o de teja. A veces divide un edificio en varios trozos y no distingue viviendas
   de comercios o naves. SegFormer cambia pocas unidades: en las pruebas no alteró zonas de
-  casas y solo mejoró algunos techos grandes. Si un edificio se divide, varias filas tienen
-  el mismo nombre. El tipo depende de lo completo que esté OpenStreetMap: en La Urbina casi
+  casas y solo mejoró algunos techos grandes. Si un edificio con nombre se divide, queda una
+  fila y su techo puede cubrir solo una parte; si no tiene nombre, cada trozo cuenta como una
+  unidad. El tipo depende de lo completo que esté OpenStreetMap: en La Urbina casi
   todos los edificios tienen nombre, pero en zonas sin nombres manda el tamaño del techo, que
   se equivoca con edificios altos de planta pequeña y con naves grandes. Un edificio con otro
   nombre, como "Hotel X", sale como Casa aunque sea grande. Por eso la grilla es editable,
@@ -143,6 +149,8 @@ La app está bien si:
 | Un techo coincide con un edificio de OpenStreetMap cuyo nombre empieza por Torre, Residencias o Edificio | La fila toma ese nombre y su tipo es Edificio |
 | Un techo que coincide con un nombre que empieza de otra forma | La fila toma ese nombre y su tipo es Casa, aunque el techo sea grande |
 | Un techo sin coincidencia | Sin nombre de OpenStreetMap. Su tipo es Edificio si mide 300 m² o más, y Casa si es más pequeño |
+| Varios techos coinciden con el mismo edificio de OpenStreetMap | Queda una sola fila y un solo techo en el mapa, con las filas numeradas sin huecos |
+| Dos edificios distintos de OpenStreetMap se llaman igual | Cada uno conserva su fila |
 | OpenStreetMap no responde | La grilla se llena sin nombres, todas las filas usan la regla del tamaño del techo y un aviso lo indica |
 | Pulsar **Eliminar** en una fila | Desaparecen la fila y su techo; se conservan el polígono, las demás filas y sus datos editados |
 | Eliminar todas las filas | Mensaje que invita a analizar de nuevo. Un análisis nuevo vuelve a traer todas las unidades |
@@ -152,7 +160,7 @@ La app está bien si:
 
 - Clasificar casa / edificio y estimar pisos con un modelo, para no depender de los nombres
   de OpenStreetMap.
-- Unir en una sola fila los trozos de un mismo edificio.
+- Unir los trozos de un edificio sin nombre, y dibujar el techo completo de los que lo tienen.
 - Exportar la grilla a CSV o GeoJSON.
 - Guardar polígonos y resultados entre sesiones.
 - Analizar varios polígonos a la vez.
