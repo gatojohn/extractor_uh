@@ -30,6 +30,14 @@ cuántas viviendas tiene la zona.
 - `torch` se instala en versión CPU con `--find-links` en `requirements.txt`. No lo cambies
   a `--extra-index-url` (`uv` no resuelve las dependencias) ni quites la línea (se instala
   la variante con CUDA).
+- Nombres: `edificios_osm()` pide a Overpass los edificios con nombre de la zona y
+  `clasificar_con_osm()` los cruza con los techos (solape mínimo `COINCIDENCIA_OSM`). Con
+  nombre, la fila lo toma y es "Edificio" solo si coincide con `PREFIJO_EDIFICIO`; si no, es
+  "Casa" aunque el techo sea grande. Sin nombre, conserva el tipo por tamaño del techo
+  (`AREA_EDIFICIO_M2`). Son reglas pedidas por el usuario: no las cambies sin preguntar.
+- Overpass se satura a menudo: se prueban los `OVERPASS_URLS` por orden con 10 segundos para
+  cada uno, y si fallan la app sigue con la regla del tamaño y un aviso. No uses
+  `api.openstreetmap.org`: responde rápido, pero su política la reserva para editar.
 - Imágenes: tiles de Esri World Imagery con zoom 18 (`ZOOM_ANALISIS`) y 19 (`ZOOM_PIPELINE`).
   Los parámetros del análisis (umbral, áreas mínima y máxima, área para proponer "Edificio",
   compacidad) son constantes al principio de `app.py`.
@@ -45,7 +53,8 @@ cuántas viviendas tiene la zona.
   fallos se convierten en `AnalisisError` con un mensaje claro para el usuario.
 - Los modelos se cargan con `@st.cache_resource` (una vez por servidor): el plan gratuito
   de Streamlit Cloud tiene poca memoria. Si SegFormer falla, la app sigue con el modelo
-  principal y lo avisa.
+  principal y lo avisa. Igual con OpenStreetMap: es una mejora y nunca debe impedir el
+  análisis.
 - Textos de la interfaz en español, sencillos, pensados para alguien sin conocimientos
   técnicos.
 - Cambios pequeños: uno por petición. Al terminar, explica qué has cambiado y por qué.
@@ -74,9 +83,15 @@ cuántas viviendas tiene la zona.
   actualiza la capa sin volver a montar el mapa: así se conservan el polígono dibujado y
   la vista. Como el mapa se dibuja antes que el botón, tras analizar se hace `st.rerun()`
   y el mensaje de error se guarda en `st.session_state.error_analisis`. El color del techo
-  y el tooltip leen los valores actuales de la grilla desde `st.session_state`.
+  y el tooltip leen los valores actuales de la grilla desde `st.session_state`. El tooltip
+  pasa por `texto_tooltip()`: folium lo copia sin escapar en una plantilla de JavaScript y
+  los nombres pueden venir de OpenStreetMap.
 - **Grilla:** cada fila es un `st.columns()`. Las claves de los widgets llevan
-  `detection_run_id` para que un análisis nuevo no herede valores del anterior.
+  `detection_run_id` para que un análisis nuevo no herede valores del anterior. El `id` de
+  una unidad no cambia al eliminar otras: de él dependen esas claves.
+- **Eliminar filas:** el botón usa `on_click` porque el callback corre antes de la recarga
+  y el mapa se dibuja antes que la grilla. Con `help`, Streamlit envuelve el botón en otro
+  elemento: en CSS usa `div.stButton button[...]`, no `div.stButton > button[...]`.
 
 ## Cómo comprobar que funciona
 
@@ -99,8 +114,17 @@ cuántas viviendas tiene la zona.
      romper la app.
   7. SegFormer no disponible → la grilla se llena con el modelo principal y un aviso lo
      indica.
-- Referencia: un polígono de ≈ 0,15 km² sobre Chacao (Caracas, 10.4965, -66.8533) da unas
-  84 unidades en unos 8 segundos.
+  8. Polígono en el centro por defecto (La Urbina) → muchas filas con nombre de
+     OpenStreetMap; las que empiezan por Torre, Residencias o Edificio son "Edificio" y las
+     demás con nombre, "Casa". Las filas sin nombre son "Edificio" si el techo mide 300 m² o
+     más, y "Casa" si es más pequeño.
+  9. OpenStreetMap no disponible → grilla sin nombres, tipo por tamaño del techo en todas las
+     filas y aviso.
+  10. Pulsar "Eliminar" → desaparecen la fila y su techo; se conservan el polígono y los
+      datos editados de las demás filas. Al eliminar todas, mensaje propio (no "No se
+      encontraron…") y un análisis nuevo trae todas las unidades.
+- Referencia: un polígono de ≈ 0,15 km² sobre La Urbina (Caracas, 10.4865, -66.8069) da unas
+  95 unidades, unas 55 con nombre de OpenStreetMap, en unos 15 segundos.
 
 ## Qué no hacer
 

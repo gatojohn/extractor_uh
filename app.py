@@ -1,13 +1,14 @@
 """Extractor UH.
 
 Aplicacion Streamlit que permite dibujar un poligono cerrado sobre un mapa y
-detectar, con un modelo de IA de Hugging Face, las unidades habitacionales
-dentro del area seleccionada.
+detectar, con modelos de IA de Hugging Face, las unidades habitacionales
+dentro del area seleccionada. Los nombres de los edificios salen de OpenStreetMap.
 """
 
 import html
 import logging
 import math
+import re
 from concurrent.futures import ThreadPoolExecutor
 from io import BytesIO
 
@@ -20,8 +21,9 @@ from folium.plugins import Draw
 from huggingface_hub import hf_hub_download
 from PIL import Image, ImageDraw
 from scipy import ndimage
-from shapely.geometry import Point, Polygon, box
-from shapely.ops import unary_union
+from shapely import STRtree
+from shapely.geometry import LineString, Point, Polygon, box
+from shapely.ops import polygonize, unary_union
 from streamlit_folium import st_folium
 
 st.set_page_config(page_title="Extractor UH", page_icon="\U0001F3E0", layout="wide")
@@ -45,7 +47,14 @@ ZOOM_ANALISIS = 18  # ~0,6 m/pixel: en pruebas segmenta mejor que 17 o 19
 AREA_MAXIMA_KM2 = 0.5
 UMBRAL_CONFIANZA = 0.3
 AREA_MINIMA_M2 = 25
-AREA_EDIFICIO_M2 = 300  # heuristica: techos mayores se proponen como "Edificio"
+AREA_EDIFICIO_M2 = 300  # heuristica: los techos sin nombre de este tamano o mayores se proponen como "Edificio"
+# Overpass es la via de lectura que pide OpenStreetMap. Sus servidores publicos se
+# saturan con frecuencia: se prueban por orden, con una espera corta para cada uno.
+OVERPASS_URLS = ("https://overpass.openstreetmap.fr/api/interpreter", "https://overpass-api.de/api/interpreter")
+OVERPASS_CONSULTA = '[out:json][timeout:8];wr["building"]["name"]({sur},{oeste},{norte},{este});out geom;'
+OVERPASS_CABECERAS = {"User-Agent": "ExtractorUH/1.0 (https://github.com/gatojohn/extractor_uh)"}
+PREFIJO_EDIFICIO = re.compile(r"(torres?|residencias?|edificios?)\b", re.IGNORECASE)
+COINCIDENCIA_OSM = 0.3  # parte del techo (o del edificio de OSM) que debe solaparse: por debajo solo se rozan
 
 
 def inject_theme() -> None:
@@ -174,6 +183,18 @@ def inject_theme() -> None:
                 outline: 2px solid var(--text) !important; outline-offset: 3px;
             }
 
+            /* Boton para eliminar una fila de la grilla */
+            div.stButton button[data-testid="stBaseButton-secondary"] {
+                min-height: 40px; width: 100%; background: transparent; border: 1px solid var(--border);
+            }
+            div.stButton button[data-testid="stBaseButton-secondary"] p {
+                color: var(--text-muted) !important; font-weight: 500;
+            }
+            div.stButton button[data-testid="stBaseButton-secondary"]:hover {
+                background: transparent; border-color: var(--magenta); box-shadow: 0 0 10px rgba(255, 43, 214, 0.30);
+            }
+            div.stButton button[data-testid="stBaseButton-secondary"]:hover p { color: var(--magenta) !important; }
+
             /* Indicador de estado */
             .uh-status {
                 min-height: 48px; display: flex; align-items: center; gap: 0.6rem;
@@ -290,6 +311,12 @@ COLOR_TIPO = {"Casa": "#00E5FF", "Edificio": "#FF2BD6"}
 COLOR_AREA_DIBUJADA = "#FFC14D"
 
 
+def texto_tooltip(texto: str) -> str:
+    # folium copia el tooltip dentro de una plantilla de JavaScript sin escaparlo, y
+    # los nombres pueden venir de OpenStreetMap.
+    return html.escape(texto).replace("\\", "&#92;").replace("`", "&#96;").replace("$", "&#36;")
+
+
 def capa_techos(units, run_id) -> folium.FeatureGroup:
     capa = folium.FeatureGroup(name="Techos detectados")
     for unit in units:
@@ -305,7 +332,7 @@ def capa_techos(units, run_id) -> folium.FeatureGroup:
             fill=True,
             fill_color=color,
             fill_opacity=0.35,
-            tooltip=f"{unit['id']}. {html.escape(nombre)} · {tipo} · {unit['area_m2']} m²",
+            tooltip=f"{unit['id']}. {texto_tooltip(nombre)} · {tipo} · {unit['area_m2']} m²",
         ).add_to(capa)
     return capa
 
@@ -432,11 +459,62 @@ def completar_techos(techos: np.ndarray, segmentacion: np.ndarray, metros_por_pi
     return completados
 
 
+def edificios_osm(polygon: Polygon) -> list[tuple] | None:
+    """Edificios con nombre de OpenStreetMap en la zona, como pares (forma, nombre).
+    Devuelve None si ningun servidor responde: los nombres son una mejora, no deben
+    impedir el analisis."""
+    oeste, sur, este, norte = polygon.bounds
+    consulta = OVERPASS_CONSULTA.format(sur=sur, oeste=oeste, norte=norte, este=este)
+    for url in OVERPASS_URLS:
+        try:
+            respuesta = requests.post(url, data={"data": consulta}, headers=OVERPASS_CABECERAS, timeout=10)
+            respuesta.raise_for_status()
+            datos = respuesta.json()
+        except requests.RequestException:
+            logging.warning("OpenStreetMap no disponible en %s", url, exc_info=True)
+            continue
+        if "remark" in datos:  # Overpass avisa asi de que corto la consulta a medias
+            logging.warning("Respuesta incompleta de %s: %s", url, datos["remark"])
+            continue
+        edificios = []
+        for elemento in datos["elements"]:
+            if elemento["type"] == "way":
+                anillos = [elemento["geometry"]]
+            else:
+                anillos = [m["geometry"] for m in elemento["members"] if m["type"] == "way" and m["role"] == "outer"]
+            lineas = [LineString([(punto["lon"], punto["lat"]) for punto in anillo]) for anillo in anillos]
+            forma = unary_union(list(polygonize(lineas)))
+            if not forma.is_empty:
+                edificios.append((forma, elemento["tags"]["name"]))
+        return edificios
+    return None
+
+
+def clasificar_con_osm(unidades: list[dict], edificios: list[tuple]) -> None:
+    """Pone a cada unidad el nombre del edificio de OpenStreetMap que mas se solapa
+    con su techo. Con nombre, es "Edificio" si empieza por Torre, Residencias o
+    Edificio, y "Casa" si no. Sin nombre, conserva el tipo estimado por el tamano
+    del techo."""
+    formas = [forma for forma, _ in edificios]
+    arbol = STRtree(formas)
+    for unidad in unidades:
+        huella = Polygon([(lon, lat) for lat, lon in unidad["huella"]]).buffer(0)
+        nombre, mayor_solape = None, 0
+        for indice in arbol.query(huella, predicate="intersects"):
+            solape = huella.intersection(formas[indice]).area
+            if solape > mayor_solape and solape >= COINCIDENCIA_OSM * min(huella.area, formas[indice].area):
+                nombre, mayor_solape = edificios[indice][1], solape
+        if nombre:
+            unidad["nombre"] = nombre
+            unidad["tipo"] = "Edificio" if PREFIJO_EDIFICIO.match(nombre) else "Casa"
+
+
 def detect_units(coords):
     """Detecta con los modelos de Hugging Face las huellas de edificios dentro
     del poligono (imagen satelital de Esri) y devuelve una unidad por cada
-    edificio, junto con un indicador de si SegFormer pudo participar. El tipo
-    se estima por el tamano del techo; pisos y apartamentos los completa el
+    edificio, junto con dos indicadores: si SegFormer pudo participar y si
+    OpenStreetMap respondio. El nombre y el tipo salen de OpenStreetMap; sin nombre,
+    el tipo se estima por el tamano del techo. Pisos y apartamentos los completa el
     usuario."""
     polygon = Polygon(coords)
     area_km2 = area_m2(polygon) / 1e6
@@ -487,7 +565,7 @@ def detect_units(coords):
     edificios = ndimage.binary_opening(techos) & np.asarray(mascara_poligono, dtype=bool)
     etiquetas, total = ndimage.label(edificios)
     if total == 0:
-        return [], pipeline_ok
+        return [], pipeline_ok, True
 
     indices = range(1, total + 1)
     areas = ndimage.sum(edificios, etiquetas, indices) * metros_por_pixel**2
@@ -524,7 +602,18 @@ def detect_units(coords):
         }
         for i, (lat, lon, area, huella) in enumerate(candidatos, start=1)
     ]
-    return unidades, pipeline_ok
+    edificios = edificios_osm(polygon)
+    osm_ok = edificios is not None
+    if osm_ok:
+        clasificar_con_osm(unidades, edificios)
+    return unidades, pipeline_ok, osm_ok
+
+
+def eliminar_unidad(unit_id: int) -> None:
+    # Se ejecuta como callback, antes de la recarga: asi el mapa, que se dibuja antes
+    # que la grilla, ya no incluye el techo de la fila eliminada.
+    st.session_state.units = [unit for unit in st.session_state.units if unit["id"] != unit_id]
+    st.session_state.filas_eliminadas += 1
 
 
 inject_theme()
@@ -553,12 +642,17 @@ if "error_analisis" not in st.session_state:
     st.session_state.error_analisis = None
 if "pipeline_ok" not in st.session_state:
     st.session_state.pipeline_ok = True
+if "osm_ok" not in st.session_state:
+    st.session_state.osm_ok = True
+if "filas_eliminadas" not in st.session_state:
+    st.session_state.filas_eliminadas = 0
 
 with st.sidebar:
     st.markdown("### Configuración del mapa")
-    center_lat = st.number_input("Latitud centro", value=7.1200, format="%.6f")
-    center_lon = st.number_input("Longitud centro", value=-66.1800, format="%.6f")
-    zoom = st.slider("Zoom inicial", min_value=2, max_value=20, value=6)
+    # Por defecto, la avenida principal de La Urbina (Caracas): zona de edificios con nombre.
+    center_lat = st.number_input("Latitud centro", value=10.4865, format="%.6f")
+    center_lon = st.number_input("Longitud centro", value=-66.8069, format="%.6f")
+    zoom = st.slider("Zoom inicial", min_value=2, max_value=20, value=17)
     map_height = st.slider("Altura del mapa (px)", min_value=500, max_value=1200, value=800, step=50)
 
 with st.container(border=True):
@@ -650,8 +744,11 @@ with st.container(border=True):
         if run_detection and polygon_coords:
             try:
                 with st.spinner("Analizando la imagen satelital con IA..."):
-                    st.session_state.units, st.session_state.pipeline_ok = detect_units(polygon_coords)
+                    st.session_state.units, st.session_state.pipeline_ok, st.session_state.osm_ok = detect_units(
+                        polygon_coords
+                    )
                 st.session_state.detection_run_id += 1
+                st.session_state.filas_eliminadas = 0
                 st.session_state.analizado = True
                 st.session_state.error_analisis = None
             except AnalisisError as error:
@@ -664,19 +761,25 @@ with st.container(border=True):
         elif st.session_state.error_analisis:
             status("warning", st.session_state.error_analisis)
         else:
-            if st.session_state.analizado and not st.session_state.units:
+            total = len(st.session_state.units)
+            eliminadas = st.session_state.filas_eliminadas
+            resumen = f"{total} unidades detectadas"
+            if eliminadas:
+                resumen = f"{total} unidades en la grilla · eliminadas: {eliminadas}"
+            avisos = []
+            if not st.session_state.pipeline_ok:
+                avisos.append("El segundo modelo no estuvo disponible.")
+            if not st.session_state.osm_ok:
+                avisos.append("OpenStreetMap no respondió: sin nombres y con el tipo estimado por el tamaño del techo.")
+
+            if st.session_state.analizado and not total and eliminadas:
+                status("info", "Eliminó todas las filas. Pulse el botón para analizar de nuevo.")
+            elif st.session_state.analizado and not total:
                 status("warning", "No se encontraron unidades habitacionales en el área.")
-            elif st.session_state.units and not st.session_state.pipeline_ok:
-                status(
-                    "warning",
-                    f"{len(st.session_state.units)} unidades detectadas solo con el modelo principal: "
-                    "el segundo modelo no estuvo disponible.",
-                )
-            elif st.session_state.units:
-                status(
-                    "success",
-                    f"Polígono de {n_vertices} vértices · {len(st.session_state.units)} unidades detectadas.",
-                )
+            elif total and avisos:
+                status("warning", f"{resumen}. {' '.join(avisos)}")
+            elif total:
+                status("success", f"Polígono de {n_vertices} vértices · {resumen}.")
             elif polygon_coords:
                 status("success", f"Polígono capturado con {n_vertices} vértices. Listo para analizar.")
             else:
@@ -684,22 +787,32 @@ with st.container(border=True):
 
 with st.expander("2. Unidades habitacionales detectadas", expanded=True):
     if not st.session_state.units:
-        if st.session_state.analizado:
+        if st.session_state.filas_eliminadas:
+            st.caption("Eliminó todas las filas del último análisis.")
+        elif st.session_state.analizado:
             st.caption("El último análisis no encontró unidades habitacionales.")
         else:
             st.caption("Aún no se ha ejecutado el análisis.")
     else:
-        st.caption(
-            "El tipo se estima según el tamaño del techo detectado. Revise cada fila y complete "
-            "pisos y apartamentos en los edificios."
-        )
+        if st.session_state.osm_ok:
+            st.caption(
+                "Si un techo coincide con un edificio de OpenStreetMap, la fila toma su nombre: es Edificio si "
+                "empieza por Torre, Residencias o Edificio, y Casa si no. Sin nombre, el tipo se estima por el "
+                f"tamaño del techo ({AREA_EDIFICIO_M2} m² o más: Edificio). Revise cada fila, complete pisos y "
+                "apartamentos en los edificios y elimine las que sobren. Nombres © colaboradores de OpenStreetMap."
+            )
+        else:
+            st.caption(
+                "El tipo se estima según el tamaño del techo detectado. Revise cada fila, complete pisos y "
+                "apartamentos en los edificios y elimine las que sobren."
+            )
         run_id = st.session_state.detection_run_id
-        column_widths = [0.5, 2, 2.3, 1.3, 1, 1]
+        column_widths = [0.4, 2, 2.1, 1.2, 0.9, 1.3, 1]
 
         header_cols = st.columns(column_widths)
         for col, label in zip(
             header_cols,
-            ["#", "Nombre del inmueble", "Coordenadas (lat, lon)", "Tipo", "Pisos", "Apartamentos"],
+            ["#", "Nombre del inmueble", "Coordenadas (lat, lon)", "Tipo", "Pisos", "Apartamentos", "&nbsp;"],
         ):
             col.markdown(f"<div class='uh-grid-header'>{label}</div>", unsafe_allow_html=True)
 
@@ -749,3 +862,11 @@ with st.expander("2. Unidades habitacionales detectadas", expanded=True):
                 unit["apartamentos"] = None
                 row_cols[4].markdown("<div class='uh-grid-cell uh-grid-muted'>&mdash;</div>", unsafe_allow_html=True)
                 row_cols[5].markdown("<div class='uh-grid-cell uh-grid-muted'>&mdash;</div>", unsafe_allow_html=True)
+
+            row_cols[6].button(
+                "Eliminar",
+                key=f"eliminar_{key_prefix}",
+                help=f"Quita la fila {unit['id']} de la grilla y su techo del mapa.",
+                on_click=eliminar_unidad,
+                args=(unit["id"],),
+            )

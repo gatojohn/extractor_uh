@@ -3,7 +3,8 @@
 Aplicación web construida con [Streamlit](https://streamlit.io/) que permite
 dibujar un polígono cerrado sobre un mapa interactivo e identificar, con un
 modelo de IA de Hugging Face, las unidades habitacionales (casas y edificios)
-que hay dentro del área seleccionada.
+que hay dentro del área seleccionada. Los nombres de los edificios salen de
+OpenStreetMap.
 
 ## Funcionalidad
 
@@ -25,14 +26,20 @@ que hay dentro del área seleccionada.
    si falló la descarga de imágenes.
 4. **Grilla de resultados** (sección colapsable) con:
    - Número de fila (ascendente).
-   - Nombre del inmueble (editable, por defecto "Inmueble 1", "Inmueble 2", ...).
+   - Nombre del inmueble (editable): el de OpenStreetMap si coincide con el techo;
+     si no, "Inmueble 1", "Inmueble 2", ...
    - Coordenadas geográficas del inmueble.
-   - Lista desplegable **Tipo**: `Casa` o `Edificio`, propuesto según el tamaño
-     del techo (300 m² o más → `Edificio`) y editable.
+   - Lista desplegable **Tipo** (editable). Con nombre de OpenStreetMap, es
+     `Edificio` si empieza por Torre, Residencias o Edificio, y `Casa` si no. Sin
+     nombre, se estima por el tamaño del techo (300 m² o más → `Edificio`).
    - Si el tipo es `Edificio`, se habilitan los campos **Pisos** y **Apartamentos**.
+   - Botón **Eliminar**: quita la fila de la grilla y su techo del mapa. Los
+     números de las demás filas no cambian y el indicador de estado muestra
+     cuántas quedan. Un análisis nuevo vuelve a traer todas las unidades.
 
-La barra lateral permite ajustar el centro del mapa (Venezuela por defecto), el
-zoom inicial y la altura del mapa (800 px por defecto).
+La barra lateral permite ajustar el centro del mapa (por defecto, la avenida
+principal de La Urbina, en Caracas), el zoom inicial (17) y la altura del mapa
+(800 px por defecto).
 
 ## La pieza de IA
 
@@ -63,17 +70,51 @@ Cómo se combinan:
 4. Los píxeles dentro del polígono se agrupan en techos, se descartan los de
    menos de 25 m² y cada techo se convierte en una fila de la grilla.
 
-- **Qué pasa si falla:** si no se pueden descargar las imágenes o el modelo
-  principal falla, la app muestra un mensaje claro y conserva el polígono. Si
-  falla SegFormer, la app sigue con el modelo principal y lo indica junto al
+## Nombres de OpenStreetMap
+
+Tras detectar los techos, la app pide a [Overpass](https://overpass-api.de/) los
+edificios con nombre de la zona y los cruza con cada techo:
+
+- Hay coincidencia si se solapa al menos el 30 % del techo o del edificio de
+  OpenStreetMap. Si varios coinciden, gana el de mayor solape.
+- La fila toma ese nombre. Es `Edificio` si empieza por Torre, Residencias o
+  Edificio (singular o plural, sin distinguir mayúsculas), y `Casa` si empieza de
+  otra forma.
+- Un techo sin coincidencia no tiene nombre: es `Edificio` si mide 300 m² o más,
+  y `Casa` si es más pequeño.
+
+## Qué pasa si falla algo
+
+- Si no se pueden descargar las imágenes o el modelo principal falla, la app
+  muestra un mensaje claro y conserva el polígono.
+- Si falla SegFormer, la app sigue con el modelo principal y lo indica junto al
   botón.
-- **Limitaciones:** detecta bien los techos claros, pero se le escapan techos
-  oscuros o de teja. Puede dividir un edificio en varios trozos y no distingue
-  viviendas de comercios. SegFormer cambia pocas unidades: en las pruebas no
-  alteró zonas de casas y solo mejoró algunos techos grandes. El resultado es una
-  estimación para revisar en la grilla.
-- **Referencia:** un polígono de ≈ 0,15 km² en Chacao (Caracas) devuelve unas
-  84 unidades en unos 8 segundos.
+- Si Overpass no responde (sus servidores públicos se saturan a menudo), la app
+  prueba un segundo servidor, espera como mucho 10 segundos por cada uno y, si
+  ambos fallan, sigue sin nombres, aplica a todas las filas la regla del tamaño
+  del techo y lo indica junto al botón.
+
+## Limitaciones
+
+- Detecta bien los techos claros, pero se le escapan techos oscuros o de teja.
+- Puede dividir un edificio en varios trozos: varias filas tendrán el mismo
+  nombre de OpenStreetMap y conviene eliminar las que sobren.
+- No distingue viviendas de comercios: una oficina llamada "Edificio X" cuenta
+  como `Edificio`.
+- La clasificación depende de lo completo que esté OpenStreetMap. En La Urbina
+  casi todos los edificios tienen nombre. Donde no los hay, manda el tamaño del
+  techo: un edificio alto de planta pequeña sale como `Casa`, y una nave grande
+  como `Edificio`.
+- Un edificio con otro nombre sale como `Casa` aunque sea grande: "Hotel X" o
+  "Automercado Y".
+- SegFormer cambia pocas unidades: en las pruebas no alteró zonas de casas y solo
+  mejoró algunos techos grandes.
+
+El resultado es una estimación para revisar en la grilla.
+
+**Referencia:** un polígono de ≈ 0,15 km² en Chacao (Caracas) tarda unos
+15 segundos. En La Urbina, uno similar devuelve unas 95 unidades: unas 55 con
+nombre de OpenStreetMap, casi todas `Edificio`.
 
 ## Diseño visual
 
@@ -130,15 +171,16 @@ Demo: https://extractoruh.streamlit.app/
 
 ## Roadmap (próximas versiones)
 
-- Clasificar casa / edificio y estimar pisos con un modelo, en lugar de por el
-  tamaño del techo.
+- Clasificar casa / edificio y estimar pisos con un modelo, para no depender de
+  los nombres de OpenStreetMap.
 - Persistir los polígonos y resultados (base de datos / almacenamiento).
 - Exportar la grilla de unidades habitacionales (CSV / GeoJSON).
 - Soportar múltiples polígonos por sesión.
 
 ## Créditos de mapas
 
-© colaboradores de [OpenStreetMap](https://www.openstreetmap.org/copyright) ·
+Mapa y nombres de edificios © colaboradores de
+[OpenStreetMap](https://www.openstreetmap.org/copyright) ·
 Imágenes satelitales © Esri · Modelos de segmentación de
 [Geobase / GeoAI](https://huggingface.co/geobase/building-footprint-segmentation) y
 [sawthiha](https://huggingface.co/sawthiha/segformer-b0-finetuned-deprem-satellite).
